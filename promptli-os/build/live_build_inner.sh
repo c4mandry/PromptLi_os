@@ -23,7 +23,6 @@ lb config noauto \
     --archive-areas "main contrib non-free non-free-firmware" \
     --bootappend-live "boot=live components quiet splash" \
     --debian-installer none \
-    --bootstrap mmdebstrap \
     --iso-application "promptLi OS" \
     --iso-publisher "promptLi" \
     --iso-volume "promptLi OS 1.0.0" \
@@ -77,7 +76,7 @@ wget
 git
 vim
 htop
-neofetch
+# neofetch removed — not available in Debian 13
 unzip
 p7zip-full
 scrot
@@ -113,7 +112,8 @@ lightdm-gtk-greeter
 
 # ── promptLi specific ──
 sudo
-policykit-1
+polkitd
+	pkexec
 
 # ── AppImage / Zen Browser runtime deps ──
 libfuse2
@@ -267,7 +267,7 @@ fi
 /opt/zen-browser/install-zen.sh 2>/dev/null || true
 
 # Install Python deps
-pip3 install --break-system-packages anthropic 2>/dev/null || true
+pip3 install --break-system-packages anthropic openai 2>/dev/null || true
 
 # Set i3 as default session
 update-alternatives --set x-session-manager /usr/bin/i3 2>/dev/null || true
