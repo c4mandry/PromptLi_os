@@ -527,6 +527,7 @@ EOF
 
 cat > "$PROJECT_DIR/assistant/requirements.txt" << 'EOF'
 anthropic>=0.39.0
+openai>=1.0.0
 EOF
 
 # --- locakHost ---
@@ -805,7 +806,7 @@ if ! id promptli >/dev/null 2>&1; then
     cp -r /etc/skel/. /home/promptli/
     chown -R promptli:promptli /home/promptli
 fi
-pip3 install --break-system-packages anthropic 2>/dev/null || true
+pip3 install --break-system-packages anthropic openai 2>/dev/null || true
 # Zen Browser
 if [ ! -f /opt/zen-browser/zen ]; then
     echo "Installing Zen Browser..."
