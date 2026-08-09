@@ -1,0 +1,16 @@
+# promptLi OS — gitignore
+
+# Extracted Debian DVD (3.7 GB)
+uzip/
+
+# Build artifacts
+promptli-os/build/work/
+promptli-os/build/output/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# macOS
+.DS_Store
