@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 promptLi Assistant — AI chat with system-level control.
-Powered by Claude API. Built for promptLi OS.
+Supports Anthropic (Claude), OpenAI (GPT/o-series), DeepSeek, and Google Gemini.
+Built for promptLi OS.
 """
 
 import json
@@ -22,9 +23,56 @@ LOG_FILE = CONFIG_DIR / "command_log.json"
 HISTORY_FILE = CONFIG_DIR / "chat_history.json"
 DAEMON_SOCKET = Path("/tmp/promptli-daemon.sock")
 
+# --- Provider definitions ---
+PROVIDERS = {
+    "anthropic": {
+        "name": "Anthropic (Claude)",
+        "api_label": "Anthropic API Key",
+        "models": [
+            "claude-sonnet-4-20250514",
+            "claude-3-5-sonnet-20241022",
+            "claude-3-opus-20240229",
+            "claude-3-5-haiku-20241022",
+        ],
+    },
+    "openai": {
+        "name": "OpenAI",
+        "api_label": "OpenAI API Key",
+        "models": [
+            "gpt-4o",
+            "gpt-4o-mini",
+            "gpt-4-turbo",
+            "o3-mini",
+            "o1",
+        ],
+    },
+    "deepseek": {
+        "name": "DeepSeek",
+        "api_label": "DeepSeek API Key",
+        "base_url": "https://api.deepseek.com",
+        "models": [
+            "deepseek-chat",
+            "deepseek-reasoner",
+        ],
+    },
+    "gemini": {
+        "name": "Google Gemini",
+        "api_label": "Gemini API Key",
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+        "models": [
+            "gemini-2.5-pro-exp-03-25",
+            "gemini-2.5-flash-preview-05-20",
+            "gemini-2.0-flash",
+            "gemini-1.5-pro",
+            "gemini-1.5-flash",
+        ],
+    },
+}
+
 # --- Default config ---
 DEFAULT_CONFIG = {
     "api_key": "",
+    "provider": "anthropic",
     "model": "claude-sonnet-4-20250514",
     "max_tokens": 4096,
     "system_prompt": (
@@ -126,6 +174,11 @@ THEME = {
 }
 
 
+def get_provider_name(provider_key):
+    """Get display name for a provider."""
+    return PROVIDERS.get(provider_key, {}).get("name", provider_key)
+
+
 class AssistantApp:
     def __init__(self, root):
         self.root = root
@@ -143,9 +196,10 @@ class AssistantApp:
         self._build_ui()
         self._load_history()
 
-    # ── API setup ──────────────────────────────────────────
+    # ── API clients ─────────────────────────────────────────
 
     def _init_anthropic(self):
+        """Initialize Anthropic client if API key is available."""
         api_key = self.config.get("api_key", "")
         if api_key:
             try:
@@ -155,6 +209,24 @@ class AssistantApp:
                 self.anthropic_client = None
             except Exception:
                 self.anthropic_client = None
+
+    def _get_openai_client(self):
+        """Get (or create) an OpenAI-compatible client for the current provider."""
+        api_key = self.config.get("api_key", "")
+        provider = self.config.get("provider", "anthropic")
+        if not api_key or provider == "anthropic":
+            return None
+        try:
+            from openai import OpenAI
+            kwargs = {"api_key": api_key}
+            base_url = PROVIDERS.get(provider, {}).get("base_url")
+            if base_url:
+                kwargs["base_url"] = base_url
+            return OpenAI(**kwargs)
+        except ImportError:
+            return None
+        except Exception:
+            return None
 
     # ── UI ─────────────────────────────────────────────────
 
@@ -178,14 +250,15 @@ class AssistantApp:
             bg=THEME["sidebar_bg"],
         ).pack(pady=(20, 5))
 
-        tk.Label(
+        self.provider_label = tk.Label(
             self.sidebar,
-            text="Claude-powered\nsystem assistant",
+            text=self._sidebar_subtitle(),
             font=("Helvetica", 10),
             fg=THEME["fg"],
             bg=THEME["sidebar_bg"],
             justify=tk.CENTER,
-        ).pack(pady=(0, 20))
+        )
+        self.provider_label.pack(pady=(0, 20))
 
         # Separator
         ttk.Separator(self.sidebar, orient=tk.HORIZONTAL).pack(fill=tk.X, padx=15)
@@ -296,6 +369,14 @@ class AssistantApp:
         # Shortcut: Ctrl+L to clear / focus input
         self.root.bind("<Control-l>", lambda e: self.input_text.focus_set())
 
+    def _sidebar_subtitle(self):
+        provider = self.config.get("provider", "anthropic")
+        name = get_provider_name(provider)
+        return f"{name}\nsystem assistant"
+
+    def _refresh_sidebar(self):
+        self.provider_label.config(text=self._sidebar_subtitle())
+
     def _on_frame_configure(self, event=None):
         self.chat_canvas.configure(scrollregion=self.chat_canvas.bbox("all"))
 
@@ -388,7 +469,7 @@ class AssistantApp:
         return "break"
 
     def send_message(self):
-        """Send user message to Claude."""
+        """Send user message to the AI."""
         if self.streaming:
             return
 
@@ -396,12 +477,35 @@ class AssistantApp:
         if not text:
             return
 
-        if not self.anthropic_client:
+        provider = self.config.get("provider", "anthropic")
+
+        # Check API key and client availability
+        if not self.config.get("api_key"):
             messagebox.showerror(
                 "No API Key",
-                "Please set your Anthropic API key in Settings first.",
+                "Please set your API key in Settings first.",
             )
             return
+
+        if provider == "anthropic" and not self.anthropic_client:
+            messagebox.showerror(
+                "Anthropic Client Error",
+                "Failed to initialize Anthropic client.\n"
+                "Check your API key and that 'anthropic' is installed:\n"
+                "  pip install anthropic",
+            )
+            return
+
+        if provider != "anthropic":
+            try:
+                import openai
+            except ImportError:
+                messagebox.showerror(
+                    "Missing Package",
+                    "The 'openai' package is required for this provider.\n"
+                    "Install it with:\n  pip install openai",
+                )
+                return
 
         # Display user message
         self._add_message("user", text)
@@ -413,20 +517,28 @@ class AssistantApp:
         self.status_label.config(text="● Thinking...", fg=THEME["warning"])
         self.send_btn.config(state=tk.DISABLED)
 
-        # Call Claude in background thread
-        thread = threading.Thread(target=self._call_claude, daemon=True)
+        # Call AI in background thread
+        thread = threading.Thread(target=self._call_ai, daemon=True)
         thread.start()
 
-    def _call_claude(self):
-        """Call Claude API and display response."""
+    def _call_ai(self):
+        """Route to the appropriate provider's API call."""
+        provider = self.config.get("provider", "anthropic")
+        if provider == "anthropic":
+            self._call_anthropic()
+        else:
+            self._call_openai_compatible()
+
+    def _call_anthropic(self):
+        """Call Anthropic (Claude) API and display response."""
         try:
             system_prompt = self.config.get("system_prompt", DEFAULT_CONFIG["system_prompt"])
             model = self.config.get("model", DEFAULT_CONFIG["model"])
             max_tokens = self.config.get("max_tokens", DEFAULT_CONFIG["max_tokens"])
 
-            # Build messages
+            # Build messages (Anthropic does not accept system role in messages)
             messages = []
-            for msg in self.conversation[-20:]:  # Last 20 messages for context
+            for msg in self.conversation[-20:]:
                 messages.append({"role": msg["role"], "content": msg["content"]})
 
             response = self.anthropic_client.messages.create(
@@ -439,12 +551,53 @@ class AssistantApp:
             reply = response.content[0].text
             self.conversation.append({"role": "assistant", "content": reply})
 
-            # Update UI on main thread
             self.root.after(0, self._display_assistant_reply, reply)
             self.root.after(0, self._save_history)
 
         except Exception as e:
-            error_msg = f"Error: {str(e)}"
+            error_msg = f"Error (Anthropic): {str(e)}"
+            self.root.after(0, self._display_assistant_reply, error_msg)
+        finally:
+            self.root.after(0, self._reset_status)
+
+    def _call_openai_compatible(self):
+        """Call OpenAI-compatible API (OpenAI, DeepSeek, Gemini)."""
+        try:
+            system_prompt = self.config.get("system_prompt", DEFAULT_CONFIG["system_prompt"])
+            model = self.config.get("model", DEFAULT_CONFIG["model"])
+            max_tokens = self.config.get("max_tokens", DEFAULT_CONFIG["max_tokens"])
+            provider = self.config.get("provider", "anthropic")
+
+            client = self._get_openai_client()
+            if client is None:
+                raise RuntimeError("Failed to create OpenAI-compatible client.")
+
+            # Build messages: system prompt goes first as a system message
+            api_messages = [{"role": "system", "content": system_prompt}]
+            for msg in self.conversation[-20:]:
+                api_messages.append({"role": msg["role"], "content": msg["content"]})
+
+            # DeepSeek reasoner model doesn't support system prompts or max_tokens
+            kwargs = {
+                "model": model,
+                "messages": api_messages,
+            }
+            if "reasoner" not in model.lower():
+                kwargs["max_tokens"] = max_tokens
+
+            response = client.chat.completions.create(**kwargs)
+
+            reply = response.choices[0].message.content
+            if reply is None:
+                reply = "(Model returned no content — this may happen with reasoning models. Try a different model.)"
+
+            self.conversation.append({"role": "assistant", "content": reply})
+
+            self.root.after(0, self._display_assistant_reply, reply)
+            self.root.after(0, self._save_history)
+
+        except Exception as e:
+            error_msg = f"Error ({get_provider_name(provider)}): {str(e)}"
             self.root.after(0, self._display_assistant_reply, error_msg)
         finally:
             self.root.after(0, self._reset_status)
@@ -520,7 +673,7 @@ class AssistantApp:
     def open_settings(self):
         settings_win = tk.Toplevel(self.root)
         settings_win.title("promptLi Settings")
-        settings_win.geometry("550x450")
+        settings_win.geometry("550x520")
         settings_win.configure(bg=THEME["bg"])
         settings_win.transient(self.root)
         settings_win.grab_set()
@@ -536,9 +689,29 @@ class AssistantApp:
             bg=THEME["bg"],
         ).pack(pady=(20, 15))
 
-        # API Key
-        tk.Label(settings_win, text="Anthropic API Key:", fg=THEME["fg"], bg=THEME["bg"],
+        # --- Provider ---
+        tk.Label(settings_win, text="Provider:", fg=THEME["fg"], bg=THEME["bg"],
                  font=("Helvetica", 11), anchor="w").pack(fill=tk.X, padx=30)
+        provider_var = tk.StringVar(value=cfg.get("provider", "anthropic"))
+        provider_names = [f"{v['name']}" for v in PROVIDERS.values()]
+        provider_keys = list(PROVIDERS.keys())
+        provider_combo = ttk.Combobox(
+            settings_win,
+            textvariable=provider_var,
+            values=provider_names,
+            state="readonly",
+            font=("Helvetica", 11),
+        )
+        provider_combo.pack(fill=tk.X, padx=30, pady=(5, 15), ipady=4)
+
+        # --- API Key ---
+        self._api_key_label = tk.Label(
+            settings_win,
+            text="API Key:",
+            fg=THEME["fg"], bg=THEME["bg"],
+            font=("Helvetica", 11), anchor="w",
+        )
+        self._api_key_label.pack(fill=tk.X, padx=30)
         api_entry = tk.Entry(
             settings_win,
             font=("Helvetica", 11),
@@ -551,25 +724,19 @@ class AssistantApp:
         api_entry.pack(fill=tk.X, padx=30, pady=(5, 15), ipady=6)
         api_entry.insert(0, cfg.get("api_key", ""))
 
-        # Model
+        # --- Model ---
         tk.Label(settings_win, text="Model:", fg=THEME["fg"], bg=THEME["bg"],
                  font=("Helvetica", 11), anchor="w").pack(fill=tk.X, padx=30)
         model_var = tk.StringVar(value=cfg.get("model", DEFAULT_CONFIG["model"]))
-        model_combo = ttk.Combobox(
+        self._model_combo = ttk.Combobox(
             settings_win,
             textvariable=model_var,
-            values=[
-                "claude-sonnet-4-20250514",
-                "claude-3-5-sonnet-20241022",
-                "claude-3-opus-20240229",
-                "claude-3-5-haiku-20241022",
-            ],
             state="readonly",
             font=("Helvetica", 11),
         )
-        model_combo.pack(fill=tk.X, padx=30, pady=(5, 15), ipady=4)
+        self._model_combo.pack(fill=tk.X, padx=30, pady=(5, 15), ipady=4)
 
-        # Max tokens
+        # --- Max tokens ---
         tk.Label(settings_win, text="Max Tokens:", fg=THEME["fg"], bg=THEME["bg"],
                  font=("Helvetica", 11), anchor="w").pack(fill=tk.X, padx=30)
         tokens_var = tk.StringVar(value=str(cfg.get("max_tokens", 4096)))
@@ -583,7 +750,7 @@ class AssistantApp:
             relief=tk.FLAT,
         ).pack(fill=tk.X, padx=30, pady=(5, 15), ipady=6)
 
-        # System prompt
+        # --- System prompt ---
         tk.Label(settings_win, text="System Prompt:", fg=THEME["fg"], bg=THEME["bg"],
                  font=("Helvetica", 11), anchor="w").pack(fill=tk.X, padx=30)
         prompt_text = tk.Text(
@@ -601,8 +768,38 @@ class AssistantApp:
         prompt_text.pack(fill=tk.X, padx=30, pady=(5, 15))
         prompt_text.insert("1.0", cfg.get("system_prompt", ""))
 
+        # --- Dynamic model & label updates ---
+        def _on_provider_change(*args):
+            display_name = provider_var.get()
+            # Map display name back to provider key
+            for key, info in PROVIDERS.items():
+                if info["name"] == display_name:
+                    # Update API key label
+                    self._api_key_label.config(text=f"{info['api_label']}:")
+                    # Update model list
+                    models = info["models"]
+                    self._model_combo["values"] = models
+                    current_model = model_var.get()
+                    if current_model not in models:
+                        model_var.set(models[0])
+                    break
+
+        provider_var.trace_add("write", _on_provider_change)
+        # Initialize model list and label
+        _on_provider_change()
+
         def save():
             cfg["api_key"] = api_entry.get().strip()
+
+            # Map display name back to provider key
+            display_name = provider_var.get()
+            for key, info in PROVIDERS.items():
+                if info["name"] == display_name:
+                    cfg["provider"] = key
+                    break
+            else:
+                cfg["provider"] = "anthropic"
+
             cfg["model"] = model_var.get()
             try:
                 cfg["max_tokens"] = int(tokens_var.get())
@@ -612,6 +809,7 @@ class AssistantApp:
             save_config(cfg)
             self.config = cfg
             self._init_anthropic()
+            self._refresh_sidebar()
             settings_win.destroy()
             messagebox.showinfo("Saved", "Settings saved successfully.")
 
@@ -691,10 +889,11 @@ class AssistantApp:
         self._save_history()
 
         # Welcome message
+        provider_name = get_provider_name(self.config.get("provider", "anthropic"))
         self._add_message(
             "assistant",
-            "Welcome to **promptLi OS**! ⚡\n\n"
-            "I'm your Claude-powered system assistant. I can help you:\n"
+            f"Welcome to **promptLi OS**! ⚡\n\n"
+            f"I'm your {provider_name}-powered system assistant. I can help you:\n"
             "• Run shell commands\n"
             "• Manage files and packages\n"
             "• Configure your system\n"
@@ -717,10 +916,11 @@ class AssistantApp:
                     pass
 
         # Show welcome if no history
+        provider_name = get_provider_name(self.config.get("provider", "anthropic"))
         self._add_message(
             "assistant",
-            "Welcome to **promptLi OS**! ⚡\n\n"
-            "I'm your Claude-powered system assistant. I can help you:\n"
+            f"Welcome to **promptLi OS**! ⚡\n\n"
+            f"I'm your {provider_name}-powered system assistant. I can help you:\n"
             "• Run shell commands\n"
             "• Manage files and packages\n"
             "• Configure your system\n"

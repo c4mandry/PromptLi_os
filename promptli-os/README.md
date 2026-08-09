@@ -7,7 +7,7 @@
 promptLi OS is a work-focused Linux distro built on Debian 13 "Trixie" featuring:
 
 - **i3** tiling window manager — fast, keyboard-driven workflow
-- **promptLi Assistant** — Claude-powered AI with system-level control
+- **promptLi Assistant** — Multi-provider AI (Claude, GPT, DeepSeek, Gemini) with system-level control
 - **locakHost** — local web hosting tool by c4mandry
 - Tokyo Night dark theme throughout
 
@@ -17,7 +17,7 @@ promptLi OS is a work-focused Linux distro built on Debian 13 "Trixie" featuring
 promptLi OS
 ├── i3 WM                    # Keyboard-driven tiling workflow
 ├── promptLi Assistant       # Desktop AI chat app
-│   ├── Claude API           # Anthropic's Claude for reasoning
+│   ├── Multi-provider AI    # Claude, GPT, DeepSeek, Gemini
 │   ├── Command execution    # System commands with safety confirmations
 │   ├── Audit logging        # All commands logged to ~/.config/promptli/
 │   └── System daemon        # Background service for elevated access
@@ -98,17 +98,23 @@ Live session:
 
 ## AI Assistant Features
 
-- **Chat interface** — Communicate with Claude naturally
-- **System commands** — Claude suggests bash commands, you approve them
+- **Chat interface** — Communicate with your chosen AI model naturally
+- **System commands** — AI suggests bash commands, you approve them
 - **Safety layer** — Dangerous commands get extra warnings, everything is logged
 - **Command log** — Full audit trail at `~/.config/promptli/command_log.json`
-- **Configurable** — Set your own API key, model, and system prompt
+- **Configurable** — Choose provider (Anthropic/OpenAI/DeepSeek/Gemini), set API key, model, and system prompt
 
 ### Getting an API Key
 
-1. Go to [console.anthropic.com](https://console.anthropic.com)
-2. Create an account and generate an API key
-3. Enter it in promptLi Assistant → Settings
+| Provider | Sign-up URL |
+|---|---|
+| Anthropic (Claude) | [console.anthropic.com](https://console.anthropic.com) |
+| OpenAI | [platform.openai.com](https://platform.openai.com) |
+| DeepSeek | [platform.deepseek.com](https://platform.deepseek.com) |
+| Google Gemini | [aistudio.google.com](https://aistudio.google.com) |
+
+1. Create an account with your chosen provider and generate an API key
+2. Open promptLi Assistant → Settings, select your provider, paste the key, click Save
 
 ## License
 
