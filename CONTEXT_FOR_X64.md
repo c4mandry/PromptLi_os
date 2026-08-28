@@ -1,4 +1,4 @@
-# promptLi OS — Project Context Handoff
+# PromptLix OS — Project Context Handoff
 
 > **To:** The AI on the x64 machine  
 > **From:** Previous session (macOS / Apple Silicon)  
@@ -6,7 +6,7 @@
 
 ---
 
-## 1. What Is promptLi OS?
+## 1. What Is PromptLix OS?
 
 A custom Debian-based Linux distribution. The user's vision:
 
@@ -21,23 +21,23 @@ A custom Debian-based Linux distribution. The user's vision:
 
 ## 2. What Was Built
 
-### Project structure (on macOS at `~/Documents/promptLi_os/v1?promptLi/`)
+### Project structure (on macOS at `~/Documents/PromptLix_os/v1?PromptLix/`)
 
 ```
-v1?promptLi/
+v1?PromptLix/
 ├── uzip/                              # Extracted Debian 13.6 DVD (9,459 files, ~3.7GB unpacked)
-├── promptli-os/                       # The distro source tree
+├── promptlix-os/                       # The distro source tree
 │   ├── assistant/
-│   │   ├── promptli_assistant.py      # Main AI chat app (Python + tkinter, Claude API)
-│   │   ├── promptli_daemon.py         # Unix socket daemon for elevated commands
-│   │   ├── promptli.desktop           # Desktop entry for app launchers
+│   │   ├── promptlix_assistant.py      # Main AI chat app (Python + tkinter, Claude API)
+│   │   ├── promptlix_daemon.py         # Unix socket daemon for elevated commands
+│   │   ├── promptlix.desktop           # Desktop entry for app launchers
 │   │   ├── install.sh                 # Installer script
 │   │   ├── requirements.txt           # Just: anthropic>=0.39.0
 │   │   └── assets/wallpaper.svg       # Tokyo Night wallpaper (1920x1080)
 │   ├── config/
 │   │   ├── i3/config                  # i3 WM config (Super key, Tokyo Night colors)
 │   │   ├── i3/i3status.conf           # i3status bar config
-│   │   └── autostart/autostart.sh     # Startup: picom, feh wallpaper, nm-applet, promptli
+│   │   └── autostart/autostart.sh     # Startup: picom, feh wallpaper, nm-applet, promptlix
 │   ├── tools/
 │   │   ├── locakhost.py               # c4mandry's web server (unchanged)
 │   │   └── locakhost.desktop          # Desktop entry
@@ -48,24 +48,24 @@ v1?promptLi/
 │   │   ├── live_build_inner.sh        # Inner build logic
 │   │   └── test.sh
 │   └── README.md
-├── build_promptli.sh                  # Self-contained native x64 builder (888 lines)
-└── promptli-os/build/output/
-    └── promptli-os-1.0.0-amd64.iso    # ✅ First successful build: 651 MB
+├── build_promptlix.sh                  # Self-contained native x64 builder (888 lines)
+└── promptlix-os/build/output/
+    └── promptlix-os-1.0.0-amd64.iso    # First successful build: 651 MB
 ```
 
 ### The ISO that was built
 
-- **File:** `promptli-os/build/output/promptli-os-1.0.0-amd64.iso` (651 MB)
+- **File:** `promptlix-os/build/output/promptlix-os-1.0.0-amd64.iso` (651 MB)
 - **Built on:** macOS Apple Silicon using Docker + QEMU emulation + mmdebstrap
 - **Status:** Built successfully but **NOT tested** (no QEMU/VirtualBox boot test done)
 - **Contents:**
   - Debian 13 "Trixie" base
   - i3 WM with Tokyo Night theme
-  - promptLi Assistant at `/opt/promptli/`
-  - locakHost at `/opt/promptli/tools/`
-  - Both available as CLI commands: `promptli` and `locakhost`
+  - PromptLix Assistant at `/opt/promptlix/`
+  - locakHost at `/opt/promptlix/tools/`
+  - Both available as CLI commands: `promptlix` and `locakhost`
   - Zen Browser installed on first boot via `setup.sh`
-  - Auto-login as user `promptli` (password: `promptli`)
+  - Auto-login as user `promptlix` (password: `promptlix`)
   - LightDM display manager
 
 ---
@@ -79,7 +79,7 @@ v1?promptLi/
 | AI app framework | Python + tkinter | Matches locakhost's stack, no extra deps |
 | Browser | Zen Browser (not Firefox) | User's preference, installed first-boot |
 | locakhost access | CLI wrapper at `/usr/local/bin/locakhost` | User wanted to type just `locakhost` in terminal |
-| Default user | `promptli` / `promptli` | Auto-login, in sudo group |
+| Default user | `promptlix` / `promptlix` | Auto-login, in sudo group |
 | Build approach | Docker + mmdebstrap (on Mac) or native live-build (on x64) | See section 4 |
 
 ---
@@ -88,7 +88,7 @@ v1?promptLi/
 
 ### On x86_64 (native) — SHOULD BE SIMPLE
 
-The user is moving to an x64 PC. On native x86_64, you can use standard `live-build` directly. The script `build_promptli.sh` (888 lines, in the project root) is a self-contained builder that:
+The user is moving to an x64 PC. On native x86_64, you can use standard `live-build` directly. The script `build_promptlix.sh` (888 lines, in the project root) is a self-contained builder that:
 
 1. Installs `live-build` and dependencies
 2. Generates all project files inline
@@ -103,13 +103,13 @@ Building an amd64 ISO on ARM Mac required many workarounds:
 
 | Approach | Result | Why it failed |
 |---|---|---|
-| `live-build` + `debootstrap` | ❌ | QEMU tar extraction bug with `libpam-runtime` package |
-| `live-build` + `mmdebstrap` wrapper | ❌ | CLI incompatible, live-build hardcoded for debootstrap |
-| `mmdebstrap --mode fakechroot` | ❌ | dash shell fd issues, QEMU postinst script failures |
-| `mmdebstrap --mode unshare` | ❌ | macOS APFS volume mount broke package scripts |
-| `mmdebstrap --mode root` in `/tmp` | ✅ | Working in container's native overlay FS, then copy ISO out |
-| `docker build` with `rm /bin/sh` | ❌ | Broke bash execution under QEMU (baffling bug) |
-| `docker build` with `SHELL` directive | ❌ | Also broke binary execution under QEMU |
+| `live-build` + `debootstrap` | FAIL | QEMU tar extraction bug with `libpam-runtime` package |
+| `live-build` + `mmdebstrap` wrapper | FAIL | CLI incompatible, live-build hardcoded for debootstrap |
+| `mmdebstrap --mode fakechroot` | FAIL | dash shell fd issues, QEMU postinst script failures |
+| `mmdebstrap --mode unshare` | FAIL | macOS APFS volume mount broke package scripts |
+| `mmdebstrap --mode root` in `/tmp` | OK | Working in container's native overlay FS, then copy ISO out |
+| `docker build` with `rm /bin/sh` | FAIL | Broke bash execution under QEMU (baffling bug) |
+| `docker build` with `SHELL` directive | FAIL | Also broke binary execution under QEMU |
 
 **The working incantation** (for reference):
 
@@ -117,7 +117,7 @@ Building an amd64 ISO on ARM Mac required many workarounds:
 docker run --rm --privileged --platform linux/amd64 \
     -v "$PROJECT_DIR:/project:ro" \
     -v "$OUTPUT_DIR:/output" \
-    promptli-builder -c '
+    promptlix-builder -c '
         # Build in /tmp (container native fs), not mounted volume
         mmdebstrap --mode root --arch amd64 --variant important \
             --hook-dir=/tmp/hooks \
@@ -128,7 +128,7 @@ docker run --rm --privileged --platform linux/amd64 \
         
         # Build squashfs + ISO
         mksquashfs /tmp/chroot /tmp/iso/live/filesystem.squashfs
-        xorriso -as mkisofs ... -output /output/promptli-os.iso /tmp/iso/
+        xorriso -as mkisofs ... -output /output/promptlix-os.iso /tmp/iso/
     '
 ```
 
@@ -142,9 +142,9 @@ Key lessons:
 
 ---
 
-## 5. What's Inside the promptLi Assistant
+## 5. What's Inside the PromptLix Assistant
 
-### promptli_assistant.py
+### promptlix_assistant.py
 
 - Python 3 + tkinter GUI
 - Tokyo Night dark color scheme (#1a1b26 background)
@@ -153,27 +153,27 @@ Key lessons:
 - Settings panel: API key, model selection, system prompt
 - Command execution flow:
   1. Claude suggests bash commands in ```bash blocks
-  2. App extracts them and shows "▶ Run" buttons
+  2. App extracts them and shows "Run" buttons
   3. User clicks → confirmation dialog appears
   4. Danger check for destructive commands (extra warning)
   5. Runs via `subprocess.run()` with 120s timeout
-  6. Output displayed in chat, logged to `~/.config/promptli/command_log.json`
-- Conversation persisted to `~/.config/promptli/chat_history.json`
+  6. Output displayed in chat, logged to `~/.config/promptlix/command_log.json`
+- Conversation persisted to `~/.config/promptlix/chat_history.json`
 - Model: claude-sonnet-4-20250514 (configurable)
 - System prompt instructs Claude it has system-level access and should wrap commands in ```bash blocks
 
-### promptli_daemon.py
+### promptlix_daemon.py
 
-- Separate Unix socket daemon at `/tmp/promptli-daemon.sock`
+- Separate Unix socket daemon at `/tmp/promptlix-daemon.sock`
 - Can run as root for elevated commands
 - Same danger keyword detection
 - JSON protocol over Unix socket
 - NOT automatically started — user would need to run it manually or via systemd
 
-### promptli.desktop
+### promptlix.desktop
 
 - Desktop entry for app menus (dmenu, thunar, etc.)
-- Exec: `python3 /opt/promptli/promptli_assistant.py`
+- Exec: `python3 /opt/promptlix/promptlix_assistant.py`
 - Category: System;Utility
 
 ---
@@ -184,20 +184,20 @@ Key lessons:
 1. **ISO not boot-tested** — Never actually booted the ISO in QEMU or real hardware
 2. **No UEFI support** — ISO only has ISOLINUX (BIOS), no GRUB-EFI
 3. **Wallpaper is SVG** — `feh` might not render SVG; may need PNG conversion
-4. **No default wallpaper file setup** — autostart.sh references `/opt/promptli/assets/wallpaper.svg` but the copy step may be missing
+4. **No default wallpaper file setup** — autostart.sh references `/opt/promptlix/assets/wallpaper.svg` but the copy step may be missing
 5. **Zen Browser download on first boot** — requires internet; if offline, no browser at all
 
 ### Should address:
 6. **`tkinter` on live system** — needs `python3-tk` package (included in package list, verify)
 7. **No network persistence** — live ISO changes are lost on reboot
 8. **No installer** — this is a live ISO only, not an installer
-9. **Daemon not auto-started** — the `promptli_daemon.py` exists but isn't wired into the assistant app
+9. **Daemon not auto-started** — the `promptlix_daemon.py` exists but isn't wired into the assistant app
 10. **Assistant uses `subprocess` directly** — doesn't talk to the daemon; it runs commands as the current user
 
 ### Nice to have:
-11. **No custom icon/logo** — just text "⚡ promptLi" in the app
+11. **No custom icon/logo** — just text "PromptLix" in the app
 12. **No Plymouth boot screen** — just text-mode boot
-13. **i3 config uses hardcoded paths** — `/opt/promptli/` instead of relative
+13. **i3 config uses hardcoded paths** — `/opt/promptlix/` instead of relative
 14. **No locale/keyboard configuration** — defaults to US English
 
 ---
@@ -234,12 +234,12 @@ Note: `neofetch` was removed (not in Debian 13), `policykit-1` renamed to `polki
 
 ```bash
 # Option A: Use the self-contained build script
-chmod +x build_promptli.sh
-./build_promptli.sh
-# Output: ~/promptli-os-output/promptli-os-1.0.0-amd64.iso
+chmod +x build_promptlix.sh
+./build_promptlix.sh
+# Output: ~/promptlix-os-output/promptlix-os-1.0.0-amd64.iso
 
 # Option B: Use the existing project files
-cd promptli-os/build
+cd promptlix-os/build
 # Edit live_build_inner.sh to remove QEMU workarounds
 # Just run lb config + lb build (native debootstrap works on x64)
 ```
@@ -248,23 +248,23 @@ cd promptli-os/build
 
 ```bash
 qemu-system-x86_64 -m 4G \
-    -cdrom promptli-os/build/output/promptli-os-1.0.0-amd64.iso \
+    -cdrom promptlix-os/build/output/promptlix-os-1.0.0-amd64.iso \
     -boot d
 ```
 
 ### If you want to develop the assistant app directly (no ISO needed):
 
 ```bash
-cd promptli-os
+cd promptlix-os
 pip install anthropic
-python3 assistant/promptli_assistant.py
+python3 assistant/promptlix_assistant.py
 ```
 
 ---
 
 ## 9. User Preferences Summary
 
-- **Name:** promptLi OS
+- **Name:** PromptLix OS
 - **Purpose:** Work-focused distro
 - **Desktop:** i3 (tiling WM)
 - **AI:** Claude API, system-level control
@@ -280,13 +280,13 @@ python3 assistant/promptli_assistant.py
 
 | File | Purpose |
 |---|---|
-| `promptli-os/assistant/promptli_assistant.py` | Main AI chat app |
-| `promptli-os/assistant/promptli_daemon.py` | System daemon |
-| `promptli-os/assistant/promptli.desktop` | Desktop entry for assistant |
-| `promptli-os/tools/locakhost.py` | Web server tool |
-| `promptli-os/config/i3/config` | i3 WM config |
-| `promptli-os/config/i3/i3status.conf` | i3status bar |
-| `promptli-os/config/autostart/autostart.sh` | Startup script |
-| `promptli-os/build/output/promptli-os-1.0.0-amd64.iso` | Built ISO (651 MB) |
-| `build_promptli.sh` | Self-contained native x64 builder |
+| `promptlix-os/assistant/promptlix_assistant.py` | Main AI chat app |
+| `promptlix-os/assistant/promptlix_daemon.py` | System daemon |
+| `promptlix-os/assistant/promptlix.desktop` | Desktop entry for assistant |
+| `promptlix-os/tools/locakhost.py` | Web server tool |
+| `promptlix-os/config/i3/config` | i3 WM config |
+| `promptlix-os/config/i3/i3status.conf` | i3status bar |
+| `promptlix-os/config/autostart/autostart.sh` | Startup script |
+| `promptlix-os/build/output/promptlix-os-1.0.0-amd64.iso` | Built ISO (651 MB) |
+| `build_promptlix.sh` | Self-contained native x64 builder |
 | `uzip/` | Extracted Debian 13.6 DVD (for reference) |

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # locakHost — easy local web hosting for testing
 # Originally by c4mandry (github.com/c4mandry/locakHost)
-# Included in promptLi OS
+# Included in PromptLix OS
 
 import http.server
 import os

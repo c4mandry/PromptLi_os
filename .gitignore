@@ -1,11 +1,11 @@
-# promptLi OS — gitignore
+# PromptLix OS — gitignore
 
 # Extracted Debian DVD (3.7 GB)
 uzip/
 
 # Build artifacts
-promptli-os/build/work/
-promptli-os/build/output/
+promptlix-os/build/work/
+promptlix-os/build/output/
 
 # Python
 __pycache__/

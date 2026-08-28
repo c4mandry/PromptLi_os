@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=PromptLix Assistant
+Comment=AI-powered system assistant for PromptLix OS
+Exec=python3 /opt/promptlix/promptlix-webview.py
+Icon=/opt/promptlix/assets/promptlix.png
+Type=Application
+Categories=System;Utility;AI;
+Terminal=false
+StartupWMClass=PromptLix
+Keywords=ai;assistant;

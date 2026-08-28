@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=PromptLix Assistant
+Comment=Start PromptLix Assistant on login
+Exec=/usr/local/bin/promptlix
+X-GNOME-Autostart-enabled=true

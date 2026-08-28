@@ -1,8 +1,8 @@
 [Desktop Entry]
 Name=LocakHost
 Comment=Easy local web hosting for testing
-Exec=python3 /opt/promptli/tools/locakhost.py
-Icon=/opt/promptli/assets/locakhost.png
+Exec=python3 /opt/promptlix/tools/locakhost.py
+Icon=/opt/promptlix/assets/locakhost.png
 Type=Application
 Categories=Development;Network;
 Terminal=false

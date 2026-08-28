@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=PromptLix GNOME Setup
+Comment=One-time GNOME theming for PromptLix (removes itself)
+Exec=/opt/promptlix/gnome-setup.sh
+X-GNOME-Autostart-enabled=true
