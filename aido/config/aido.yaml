@@ -8,8 +8,8 @@ model:
   path: ~/.aido/models/granite.gguf
   # Token budget for the conversation window.
   context_size: 2048
-  # Maximum tokens generated per agent step.
-  max_tokens: 512
+  # Maximum tokens generated per agent step (room for list-style answers).
+  max_tokens: 768
   # Lower temperature = more deterministic tool calls.
   temperature: 0.2
   top_p: 0.9
@@ -25,8 +25,9 @@ safety:
   confirm_destructive: true
   # File tools may only access these directories (the default sandbox is
   # the home directory; add other roots only if you trust them).
+  # Note: quote "~" so YAML does not parse it as null.
   allowed_dirs:
-    - ~
+    - "~"
   # Automatically back up config files before editing them.
   auto_backup_configs: true
 

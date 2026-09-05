@@ -36,7 +36,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "model": {
         "path": "~/.aido/models/granite.gguf",
         "context_size": 2048,
-        "max_tokens": 512,
+        "max_tokens": 768,
         "temperature": 0.2,
         "top_p": 0.9,
     },
@@ -122,6 +122,8 @@ def restrict_to_allowed(path: Any, allowed_dirs: list[str] | None = None) -> Pat
     if not allowed_dirs:
         return resolved
     for allowed in allowed_dirs:
+        if not allowed:  # YAML parses a bare '~' as null — skip such entries
+            continue
         root = expand_path(allowed)
         try:
             resolved.relative_to(root)
@@ -129,7 +131,8 @@ def restrict_to_allowed(path: Any, allowed_dirs: list[str] | None = None) -> Pat
         except ValueError:
             continue
     raise AidoError(
-        f"Access denied: '{path}' is outside the allowed directories: {', '.join(allowed_dirs)}."
+        f"Access denied: '{path}' is outside the allowed directories: "
+        f"{', '.join(str(d) for d in allowed_dirs if d)}."
     )
 
 

@@ -100,6 +100,52 @@ def test_multiple_tools_at_once(tmp_path):
     assert result["answer"] == "done"
 
 
+def test_string_arguments_are_parsed(tmp_path):
+    """Regression test: small models often emit arguments as a JSON string."""
+    config = {"safety": {"allowed_dirs": [str(tmp_path)]}}
+    a = Agent(
+        model=FakeModel(
+            json.dumps({"tool": "list_files", "arguments": json.dumps({"path": str(tmp_path)})}),
+            json.dumps({"answer": "done"}),
+        ),
+        config=config,
+    )
+    result = a.chat("list")
+    # The tool actually executed (its result was fed back) — no TypeError.
+    tool_message = a.model.requests[-1]["messages"][-1]["content"]
+    assert '"count": 0' in tool_message
+    assert "Invalid arguments" not in tool_message
+    assert result["answer"] == "done"
+
+
+def test_unparseable_string_arguments_fall_back_to_empty(tmp_path):
+    config = {"safety": {"allowed_dirs": [str(tmp_path)]}}
+    a = Agent(
+        model=FakeModel(
+            json.dumps({"tool": "list_files", "arguments": "not json at all"}),
+            json.dumps({"answer": "done"}),
+        ),
+        config=config,
+    )
+    a.chat("list")
+    tool_message = a.model.requests[-1]["messages"][-1]["content"]
+    # The call executed with default arguments instead of raising a TypeError.
+    assert '"tool": "list_files"' in tool_message
+    assert "Invalid arguments" not in tool_message
+
+
+def test_tool_results_message_instructs_model():
+    a = Agent(
+        model=FakeModel(
+            json.dumps({"tool": "list_files", "arguments": {"path": "."}}),
+            json.dumps({"answer": "done"}),
+        )
+    )
+    a.chat("list")
+    tool_message = a.model.requests[-1]["messages"][-1]["content"]
+    assert "ONLY the information in these results" in tool_message
+
+
 def test_unknown_tool_is_reported():
     a = Agent(
         model=FakeModel(

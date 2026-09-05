@@ -94,6 +94,23 @@ def test_restrict_to_allowed_without_rules_allows_everything(tmp_path):
     assert utils.restrict_to_allowed(str(tmp_path)) == tmp_path
 
 
+def test_restrict_to_allowed_ignores_null_entries(tmp_path):
+    """Regression test: a bare '~' in YAML parses as null (None) entries."""
+    allowed = [None, str(tmp_path)]
+    (tmp_path / "file.txt").write_text("hi")
+    assert utils.restrict_to_allowed(str(tmp_path / "file.txt"), allowed) == tmp_path / "file.txt"
+
+
+def test_restrict_to_allowed_none_entry_raises_aido_error(tmp_path):
+    (tmp_path / "outside").mkdir()
+    try:
+        utils.restrict_to_allowed(str(tmp_path / "outside"), [None])
+    except utils.AidoError as exc:
+        assert "Access denied" in str(exc)
+    else:
+        raise AssertionError("expected AidoError when no usable allowed dir remains")
+
+
 # -- configuration -------------------------------------------------------------
 
 def test_merge_configs_nested():
@@ -107,6 +124,14 @@ def test_load_config_returns_defaults_when_missing(tmp_path, monkeypatch):
     monkeypatch.delenv("AIDO_CONFIG", raising=False)
     config = utils.load_config()
     assert config["model"]["context_size"] == 2048
+    assert config["safety"]["allowed_dirs"] == ["~"]
+
+
+def test_shipped_config_parses_allowed_dirs_as_strings():
+    """Regression test: a bare '~' in YAML parses as null, not the home dir."""
+    from pathlib import Path
+
+    config = utils.load_config(str(Path(__file__).resolve().parent.parent / "config" / "aido.yaml"))
     assert config["safety"]["allowed_dirs"] == ["~"]
 
 

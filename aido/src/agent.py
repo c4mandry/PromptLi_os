@@ -34,6 +34,7 @@ Rules:
 - To call one tool: {{"tool": "<name>", "arguments": {{"<arg>": <value>}}}}
 - To call several tools at once: {{"tools": [{{"tool": "...", "arguments": {{...}}}}, ...]}}
 - When you have all the information you need, finish with: {{"answer": "your reply to the user"}}
+- Use the exact file paths and names from the user's message when calling tools.
 - Prefer actually performing the requested action over describing it.
 - Base your answer on the tool results you receive; do not invent facts.
 - For destructive actions (closing windows, killing processes) the system may ask the user first.
@@ -177,7 +178,12 @@ class Agent:
             tool_calls.extend(calls)
             tool_message = {
                 "role": "user",
-                "content": "Tool results (JSON):\n" + json.dumps(results, ensure_ascii=False),
+                "content": (
+                    "Tool results (JSON):\n"
+                    + json.dumps(results, ensure_ascii=False)
+                    + "\n\nAnswer the user's request using ONLY the information in these results. "
+                    "If a tool reported an error, tell the user about it instead of guessing."
+                ),
             }
             self.history.append(tool_message)
             messages.append(tool_message)
@@ -188,12 +194,29 @@ class Agent:
 
     @staticmethod
     def _collect_calls(parsed: dict[str, Any]) -> list[dict[str, Any]]:
-        """Normalize a parsed response into a list of tool calls."""
+        """Normalize a parsed response into a list of tool calls.
+
+        Small models frequently emit ``arguments`` as a JSON *string* instead
+        of an object (e.g. ``"arguments": "{\"path\": \".\"}"``) — each call
+        is repaired into the object form before execution.
+        """
+        calls: list[dict[str, Any]]
         if "tools" in parsed and isinstance(parsed["tools"], list):
-            return [call for call in parsed["tools"] if isinstance(call, dict) and "tool" in call]
-        if "tool" in parsed:
-            return [{"tool": parsed["tool"], "arguments": parsed.get("arguments") or {}}]
-        return []
+            calls = [call for call in parsed["tools"] if isinstance(call, dict) and "tool" in call]
+        elif "tool" in parsed:
+            calls = [{"tool": parsed["tool"], "arguments": parsed.get("arguments") or {}}]
+        else:
+            return []
+        return [Agent._normalize_call(call) for call in calls]
+
+    @staticmethod
+    def _normalize_call(call: dict[str, Any]) -> dict[str, Any]:
+        arguments = call.get("arguments") or {}
+        if isinstance(arguments, str):
+            parsed_arguments = utils.extract_json(arguments)
+            arguments = parsed_arguments if parsed_arguments is not None else {}
+        call["arguments"] = arguments
+        return call
 
     def _execute(self, call: dict[str, Any], interactive: bool | None, assume_yes: bool) -> dict[str, Any]:
         """Run one tool call with safety checks; never lets an error kill the loop."""

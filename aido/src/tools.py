@@ -650,7 +650,7 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
     {
         "name": "file_info",
         "description": "Get detailed properties (size, permissions, dates) of a file or directory.",
-        "parameters": {"path": "path to inspect"},
+        "parameters": {"path": "the exact path the user asked about (e.g. 'README.md')"},
         "dangerous": False,
     },
     {
