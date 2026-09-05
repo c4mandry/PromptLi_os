@@ -8,6 +8,7 @@ PromptLix OS is a work-focused Linux distro built on Debian 13 "Trixie" featurin
 
 - **GNOME** desktop — macOS-premium look: Tokyo Night dark theme, bottom dock, window controls on the left
 - **PromptLix Assistant** — a website with full system access, shown in a desktop webview
+- **AIDO** — fully local AI desktop operator (offline model, no cloud, `aido` / `aido --gui`)
 - **Any AI model** — Anthropic, OpenAI, DeepSeek, Gemini, or any OpenAI-compatible endpoint
 - **Locked system prompt** — not editable from the UI
 - **Live window awareness** — the AI sees a JSONC desktop reference (windows.jsonc)

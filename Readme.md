@@ -27,6 +27,7 @@ PromptLix OS is a **work-focused Linux distribution** built on Debian 13 "Trixie
 
 - **GNOME** desktop with a **macOS-premium look** — Tokyo Night dark theme, dock at the bottom, window controls on the left, glass effects
 - **PromptLix Assistant** — a web-based AI assistant with full system access. The desktop app is a webview of a local website served from a hidden port.
+- **AIDO** — a fully local, open-source AI desktop operator (llama.cpp + Granite 1B): no cloud, no API keys, natural-language desktop/file/web automation
 - **Any AI model** — Anthropic, OpenAI, DeepSeek, Gemini, or any OpenAI-compatible endpoint (Ollama, LM Studio, OpenRouter, vLLM, ...)
 - **Locked system prompt** — the user cannot edit the AI's system prompt
 - **Live window awareness** — the AI receives a JSONC reference (`windows.jsonc`) describing every visible window: program, title, position, size, fullscreen state, and focus
@@ -91,6 +92,11 @@ PromptLix OS
 │   │   └── Desktop awareness       # windows.jsonc injected into the AI context
 │   ├── promptlix-webview           # Desktop shell (GTK WebKit2) around the website
 │   └── promptlix_windowd           # xdotool-based window tracker (2s refresh)
+├── AIDO (Local AI)                # Fully offline AI desktop operator
+│   ├── aido CLI                   # REPL + one-shot natural-language commands
+│   ├── aido --gui                 # Tkinter chat GUI (desktop entry included)
+│   ├── Local model                # IBM Granite 4.0 H 1B GGUF (~700MB, auto-download)
+│   └── Desktop/file/web tools     # window control, config edits, browsing, downloads
 ├── Calamares installer             # Graphical disk installer (UEFI + BIOS)
 ├── locakHost                       # CLI web development server
 └── Zen Browser                     # Default browser (installed on first boot)
@@ -222,7 +228,26 @@ cd promptlix-os/assistant
 pip install -r requirements.txt
 python3 promptlix-server.py          # serves http://127.0.0.1:18437
 python3 promptlix-webview.py         # or open it in a browser with ?token=<token>
+
+# Run AIDO locally (no ISO needed)
+cd aido
+pip install -r requirements.txt
+bash scripts/download_model.sh       # ~700MB local Granite model
+PYTHONPATH=src python3 src/aido.py   # or: aido --gui
 ```
+
+### AIDO — the offline assistant
+
+AIDO runs entirely on your hardware: a 700MB quantized Granite 1B model via llama.cpp, no cloud calls, no API keys. It opens apps, manages windows (move/resize/focus), lists and edits config files (with backups), browses/downloads from the web, and logs every action to `~/.aido/logs/aido.log`. File access is sandboxed to `~` by default (`safety.allowed_dirs` in `~/.aido/aido.yaml`).
+
+### Boot troubleshooting (if the ISO won't boot)
+
+1. The live boot is **verbose** — kernel and init messages are visible. Note the last lines before any loop.
+2. For even more detail, edit the boot entry and append `debug` to the kernel line (or pass `boot=live debug`).
+3. Report: the last screen output, whether you boot BIOS or UEFI, and whether it's QEMU/VirtualBox or real hardware. Known weak spots to check first:
+   - **BIOS boot via ISOLINUX** — try the UEFI boot path (or vice versa); some firmwares dislike the hybrid MBR.
+   - **Kernel panic after initramfs** — screenshot the trace; it names the failing module/driver.
+   - **Display manager loop (flashing login)** — GDM restarting: check `journalctl -u gdm3` after booting with `systemd.debug-shell` or from a chroot.
 
 ---
 
@@ -236,7 +261,7 @@ The following packages are installed on the ISO (and therefore on the installed 
 
 **GNOME desktop:** `gnome-core`, `gnome-tweaks`, `gdm3`, `file-roller`, `librsvg2-common`, `pipewire-pulse`, `gnome-shell-extension-dashtodock`, `plymouth`
 
-**X11:** `xorg`, `x11-utils`, `xdotool` (window tracking)
+**X11:** `xorg`, `x11-utils`, `xdotool`, `wmctrl` (window tracking + AIDO window tools)
 
 **Fonts:** `fonts-jetbrains-mono`, `fonts-noto`, `fonts-noto-cjk`
 
@@ -246,7 +271,7 @@ The following packages are installed on the ISO (and therefore on the installed 
 
 **Utilities:** `curl`, `wget`, `git`, `vim`, `htop`, `unzip`, `p7zip-full`, `xclip`, `brightnessctl`
 
-**Python:** `python3`, `python3-pip`, `python3-gi`, `gir1.2-webkit2-4.1` (webview), `python3-pil`
+**Python:** `python3`, `python3-pip`, `python3-gi`, `gir1.2-webkit2-4.1` (webview), `python3-tk` (AIDO GUI), `python3-pil`
 
 **System:** `sudo`, `polkitd`, `pkexec`, `libasound2`, `libdbus-glib-1-2`, `libgtk-3-0`, `libfuse2`, `fuse`, `rsync`, `unattended-upgrades`
 
@@ -330,6 +355,7 @@ The kernel is Debian's official `linux-image-amd64` (kernel.org source, GPG-sign
 | `promptlix-os/build/build_iso.sh` | Docker-based ISO builder |
 | `promptlix-os/build/live_build_inner.sh` | Inner build logic (live-build + Calamares config) |
 | `promptlix-os/build/test.sh` | Quick test runner |
+| `aido/` | AIDO — fully local AI desktop operator (src, config, scripts, tests) |
 
 Boot experience: GRUB shows "PromptLix" (via `GRUB_DISTRIBUTOR` + Calamares `bootloaderEntryName`), a Plymouth splash theme (`/usr/share/plymouth/themes/promptlix/`) shows a Tokyo Night logo screen during boot, and the GDM login/lock screen uses the PromptLix wallpaper + dark theme (dconf profile `gdm`). The assistant server runs as a systemd user service (`promptlix-server.service`) enabled for every new user via `/etc/skel`.
 

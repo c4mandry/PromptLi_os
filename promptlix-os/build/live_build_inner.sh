@@ -33,11 +33,11 @@ lb config noauto \
     --architecture amd64 \
     --distribution trixie \
     --archive-areas "main contrib non-free non-free-firmware" \
-    --bootappend-live "boot=live quiet splash" \
+    --bootappend-live "boot=live" \
     --debian-installer none \
     --iso-application "PromptLix OS" \
     --iso-publisher "PromptLix" \
-    --iso-volume "PromptLix OS $VERSION" \
+    --iso-volume "PromptLix" \
     --linux-flavours amd64 \
     --memtest none \
     --binary-images iso-hybrid
@@ -99,12 +99,14 @@ xclip
 brightnessctl
 xdotool
 x11-utils
+wmctrl
 
-# ── Python (PromptLix Assistant) ──
+# ── Python (PromptLix Assistant + AIDO) ──
 python3
 python3-pip
 python3-gi
 gir1.2-webkit2-4.1
+python3-tk
 python3-pil
 python3-pil.imagetk
 
@@ -152,6 +154,13 @@ cp "$PROJECT/tools/locakhost.py" "$INCLUDES/opt/promptlix/tools/"
 cp "$PROJECT/config/autostart/gnome-setup.sh" "$INCLUDES/opt/promptlix/gnome-setup.sh"
 chmod +x "$INCLUDES/opt/promptlix/gnome-setup.sh"
 
+# /opt/aido — AIDO: fully local AI desktop operator (no cloud, no API keys)
+mkdir -p "$INCLUDES/opt/aido"
+cp -r "$PROJECT/aido/src" "$INCLUDES/opt/aido/"
+cp -r "$PROJECT/aido/config" "$INCLUDES/opt/aido/"
+cp -r "$PROJECT/aido/scripts" "$INCLUDES/opt/aido/"
+cp "$PROJECT/aido/requirements.txt" "$PROJECT/aido/setup.py" "$PROJECT/aido/README.md" "$PROJECT/aido/LICENSE" "$INCLUDES/opt/aido/"
+
 # First-boot setup script (runs on live session AND installed system)
 cat > "$INCLUDES/opt/promptlix/setup.sh" << 'SETUP'
 #!/bin/bash
@@ -186,6 +195,24 @@ fi
 
 # Python deps for the assistant
 pip3 install --break-system-packages anthropic openai 2>/dev/null || true
+
+# AIDO — local AI desktop operator
+# Default config for new users (and the live user, if already created)
+mkdir -p /etc/skel/.aido
+cp /opt/aido/config/aido.yaml /etc/skel/.aido/aido.yaml 2>/dev/null || true
+if id promptlix &>/dev/null; then
+    mkdir -p /home/promptlix/.aido
+    cp /opt/aido/config/aido.yaml /home/promptlix/.aido/aido.yaml 2>/dev/null || true
+    chown -R promptlix:promptlix /home/promptlix/.aido 2>/dev/null || true
+fi
+# Install AIDO deps (llama-cpp-python ships prebuilt wheels for amd64)
+pip3 install --break-system-packages -r /opt/aido/requirements.txt 2>/dev/null || true
+# Heavy downloads in the background so login is not blocked:
+# the ~700MB Granite model + Playwright's Chromium, as the desktop user
+if id promptlix &>/dev/null; then
+    nohup sudo -u promptlix bash -c "bash /opt/aido/scripts/download_model.sh; python3 -m playwright install chromium" \
+        >/tmp/aido-setup.log 2>&1 &
+fi
 
 # Run once per installation
 systemctl disable promptlix-setup.service 2>/dev/null || true
@@ -222,6 +249,17 @@ StartupWMClass=zen
 Terminal=false
 DESKTOP
 
+cat > "$INCLUDES/usr/share/applications/aido.desktop" << 'DESKTOP'
+[Desktop Entry]
+Name=AIDO — Local AI
+Comment=Offline AI desktop operator (local model, no cloud)
+Exec=/usr/local/bin/aido --gui
+Icon=utilities-terminal
+Type=Application
+Categories=Utility;AI;
+Terminal=false
+DESKTOP
+
 # ── CLI wrappers ──
 mkdir -p "$INCLUDES/usr/local/bin"
 cat > "$INCLUDES/usr/local/bin/promptlix" << 'WRAP'
@@ -229,6 +267,12 @@ cat > "$INCLUDES/usr/local/bin/promptlix" << 'WRAP'
 exec python3 /opt/promptlix/promptlix-webview.py "$@"
 WRAP
 chmod +x "$INCLUDES/usr/local/bin/promptlix"
+
+cat > "$INCLUDES/usr/local/bin/aido" << 'WRAP'
+#!/bin/bash
+PYTHONPATH=/opt/aido/src exec python3 /opt/aido/src/aido.py "$@"
+WRAP
+chmod +x "$INCLUDES/usr/local/bin/aido"
 
 cat > "$INCLUDES/usr/local/bin/locakhost" << 'WRAP'
 #!/bin/bash
@@ -562,6 +606,7 @@ chmod +x /opt/promptlix/promptlix_windowd.py
 chmod +x /opt/promptlix/setup.sh
 chmod +x /opt/promptlix/gnome-setup.sh
 chmod +x /usr/local/bin/promptlix
+chmod +x /usr/local/bin/aido
 chmod +x /usr/local/bin/locakhost
 chmod 644 /opt/promptlix/system_prompt.txt
 chown -R root:root /opt/promptlix
