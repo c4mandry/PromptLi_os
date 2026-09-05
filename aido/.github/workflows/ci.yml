@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  test:
+    name: "Python ${{ matrix.python }}"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      # wmctrl/xdotool enable the window tools; Xvfb + openbox + scrot give
+      # them a real (virtual) X11 display to run against, including the
+      # live screenshot test.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wmctrl xdotool xvfb openbox scrot
+
+      # The heavy runtime deps (llama-cpp-python, Playwright) are not needed
+      # for the test suite — the agent is tested with a scripted fake model.
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest requests PyYAML ruff
+          pip install --no-deps -e .
+
+      - name: Lint with ruff
+        run: ruff check src tests setup.py
+
+      - name: Run tests (under Xvfb for window/screenshot tools)
+        run: |
+          xvfb-run -a -s "-screen 0 1280x800x24" bash -c "openbox & sleep 2; pytest tests/ -q"

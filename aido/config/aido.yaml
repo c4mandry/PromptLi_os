@@ -1,0 +1,45 @@
+# AIDO user configuration.
+# Every value here overrides the built-in defaults (see utils.DEFAULT_CONFIG).
+# The file is looked up in this order: --config flag, $AIDO_CONFIG,
+# ./config/aido.yaml, ~/.aido/aido.yaml.
+
+model:
+  # Path to the GGUF model file (~ and $VARS are expanded).
+  path: ~/.aido/models/granite.gguf
+  # Token budget for the conversation window.
+  context_size: 2048
+  # Maximum tokens generated per agent step.
+  max_tokens: 512
+  # Lower temperature = more deterministic tool calls.
+  temperature: 0.2
+  top_p: 0.9
+
+agent:
+  # How many tool-calling rounds the agent may perform per request.
+  max_tool_iterations: 5
+  # How many recent messages are kept in the model context.
+  max_history_messages: 12
+
+safety:
+  # Ask before closing windows or killing processes.
+  confirm_destructive: true
+  # File tools may only access these directories (the default sandbox is
+  # the home directory; add other roots only if you trust them).
+  allowed_dirs:
+    - ~
+  # Automatically back up config files before editing them.
+  auto_backup_configs: true
+
+web:
+  # Run the embedded browser without a visible window.
+  browser_headless: true
+  # Where downloads go when no destination is given.
+  download_dir: ~/Downloads
+  # Timeout (seconds) for downloads.
+  download_timeout: 120
+  user_agent: "AIDO/0.1.0"
+
+logging:
+  # Audit trail location — every tool call is logged here.
+  dir: ~/.aido/logs
+  level: INFO
