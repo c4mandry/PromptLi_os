@@ -74,7 +74,7 @@ def main():
         print("error: could not start the PromptLix server", file=sys.stderr)
         sys.exit(1)
 
-    window = Gtk.Window(title="PromptLix")
+    window = Gtk.Window(title="AIDO")
     window.set_default_size(1280, 800)
     window.set_position(Gtk.WindowPosition.CENTER)
     window.connect("destroy", Gtk.main_quit)

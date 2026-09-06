@@ -9,7 +9,7 @@
 1. [Overview](#1-overview)
 2. [Project Structure](#2-project-structure)
 3. [Architecture](#3-architecture)
-4. [The PromptLix Assistant](#4-the-promptlix-assistant)
+4. [AIDO — the AI Assistant](#4-aido--the-ai-assistant)
 5. [Building the ISO](#5-building-the-iso)
 6. [Installing to Disk](#6-installing-to-disk)
 7. [Testing & Running](#7-testing--running)
@@ -26,8 +26,8 @@
 PromptLix OS is a **work-focused Linux distribution** built on Debian 13 "Trixie". It features:
 
 - **GNOME** desktop with a **macOS-premium look** — Tokyo Night dark theme, dock at the bottom, window controls on the left, glass effects
-- **PromptLix Assistant** — a web-based AI assistant with full system access. The desktop app is a webview of a local website served from a hidden port.
-- **AIDO** — a fully local, open-source AI desktop operator (llama.cpp + Granite 1B): no cloud, no API keys, natural-language desktop/file/web automation
+- **AIDO** — the AI assistant app: web-based with full system access. The desktop app is a webview of a local website served from a hidden port.
+- **AIDO Local** — a fully local, open-source AI desktop operator (llama.cpp + Granite 1B): no cloud, no API keys, natural-language desktop/file/web automation
 - **Any AI model** — Anthropic, OpenAI, DeepSeek, Gemini, or any OpenAI-compatible endpoint (Ollama, LM Studio, OpenRouter, vLLM, ...)
 - **Locked system prompt** — the user cannot edit the AI's system prompt
 - **Live window awareness** — the AI receives a JSONC reference (`windows.jsonc`) describing every visible window: program, title, position, size, fullscreen state, and focus
@@ -85,14 +85,14 @@ PromptLix_os/                             # Project root
 PromptLix OS
 ├── Debian 13 "Trixie" base         # Stable, well-tested foundation
 ├── GNOME desktop                   # GDM auto-login (X11), macOS-premium theming
-├── PromptLix Assistant             # Web app + local backend
+├── AIDO (assistant app)             # Web app + local backend
 │   ├── promptlix-server            # 127.0.0.1:18437 (hidden port, token auth)
 │   │   ├── AI chat                 # Any model: Anthropic / OpenAI-compatible / custom
 │   │   ├── Command execution       # Run buttons, danger checks, audit log
 │   │   └── Desktop awareness       # windows.jsonc injected into the AI context
 │   ├── promptlix-webview           # Desktop shell (GTK WebKit2) around the website
 │   └── promptlix_windowd           # xdotool-based window tracker (2s refresh)
-├── AIDO (Local AI)                # Fully offline AI desktop operator
+├── AIDO Local (offline AI)        # Fully offline AI desktop operator
 │   ├── aido CLI                   # REPL + one-shot natural-language commands
 │   ├── aido --gui                 # Tkinter chat GUI (desktop entry included)
 │   ├── Local model                # IBM Granite 4.0 H 1B GGUF (~700MB, auto-download)
@@ -126,11 +126,11 @@ PromptLix OS
 
 ---
 
-## 4. The PromptLix Assistant
+## 4. AIDO — the AI Assistant
 
 ### How to use it
 
-1. The assistant is **fully up at every boot**: a systemd user service starts the server at login (hidden port always listening), and GNOME autostart opens the webview window on the PromptLix-branded desktop.
+1. AIDO is **fully up at every boot**: a systemd user service starts the server at login (hidden port always listening), and GNOME autostart opens the AIDO window on the PromptLix-branded desktop.
 2. First time, open **Settings** and pick a provider, paste an API key, and choose a model — or point a custom provider at any OpenAI-compatible URL (e.g. `http://localhost:11434/v1` for Ollama).
 3. Ask the AI anything. It has full system access: it can run shell commands (each wrapped in a ```bash block becomes a **Run** button with a confirmation dialog), manage files, install packages, and see your desktop.
 
@@ -236,9 +236,9 @@ bash scripts/download_model.sh       # ~700MB local Granite model
 PYTHONPATH=src python3 src/aido.py   # or: aido --gui
 ```
 
-### AIDO — the offline assistant
+### AIDO Local — the offline operator
 
-AIDO runs entirely on your hardware: a 700MB quantized Granite 1B model via llama.cpp, no cloud calls, no API keys. It opens apps, manages windows (move/resize/focus), lists and edits config files (with backups), browses/downloads from the web, and logs every action to `~/.aido/logs/aido.log`. File access is sandboxed to `~` by default (`safety.allowed_dirs` in `~/.aido/aido.yaml`).
+AIDO Local runs entirely on your hardware: a 700MB quantized Granite 1B model via llama.cpp, no cloud calls, no API keys. It opens apps, manages windows (move/resize/focus), lists and edits config files (with backups), browses/downloads from the web, and logs every action to `~/.aido/logs/aido.log`. File access is sandboxed to `~` by default (`safety.allowed_dirs` in `~/.aido/aido.yaml`).
 
 ### Boot troubleshooting (if the ISO won't boot)
 
@@ -355,7 +355,7 @@ The kernel is Debian's official `linux-image-amd64` (kernel.org source, GPG-sign
 | `promptlix-os/build/build_iso.sh` | Docker-based ISO builder |
 | `promptlix-os/build/live_build_inner.sh` | Inner build logic (live-build + Calamares config) |
 | `promptlix-os/build/test.sh` | Quick test runner |
-| `aido/` | AIDO — fully local AI desktop operator (src, config, scripts, tests) |
+| `aido/` | AIDO Local — fully local AI desktop operator (src, config, scripts, tests) |
 
 Boot experience: GRUB shows "PromptLix" (via `GRUB_DISTRIBUTOR` + Calamares `bootloaderEntryName`), a Plymouth splash theme (`/usr/share/plymouth/themes/promptlix/`) shows a Tokyo Night logo screen during boot, and the GDM login/lock screen uses the PromptLix wallpaper + dark theme (dconf profile `gdm`). The assistant server runs as a systemd user service (`promptlix-server.service`) enabled for every new user via `/etc/skel`.
 

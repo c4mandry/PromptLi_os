@@ -7,8 +7,8 @@
 PromptLix OS is a work-focused Linux distro built on Debian 13 "Trixie" featuring:
 
 - **GNOME** desktop — macOS-premium look: Tokyo Night dark theme, bottom dock, window controls on the left
-- **PromptLix Assistant** — a website with full system access, shown in a desktop webview
-- **AIDO** — fully local AI desktop operator (offline model, no cloud, `aido` / `aido --gui`)
+- **AIDO** — the assistant app: a website with full system access, shown in a desktop webview
+- **AIDO Local** — fully offline AI desktop operator (local model, no cloud, `aido` / `aido --gui`)
 - **Any AI model** — Anthropic, OpenAI, DeepSeek, Gemini, or any OpenAI-compatible endpoint
 - **Locked system prompt** — not editable from the UI
 - **Live window awareness** — the AI sees a JSONC desktop reference (windows.jsonc)
@@ -22,7 +22,7 @@ PromptLix OS is a work-focused Linux distro built on Debian 13 "Trixie" featurin
 PromptLix OS
 ├── GNOME desktop            # GDM auto-login (X11), macOS-premium theming
 ├── Boot branding            # GRUB "PromptLix", Plymouth splash theme, themed login screen
-├── PromptLix Assistant      # Web app + local backend, starts on boot
+├── AIDO (assistant app)      # Web app + local backend, starts on boot
 │   ├── server (127.0.0.1:18437, token auth)   # AI chat + command execution
 │   ├── webview (GTK WebKit2)                  # Desktop shell around the website
 │   └── windowd (xdotool)                      # windows.jsonc every 2s

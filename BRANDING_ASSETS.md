@@ -41,7 +41,7 @@ They're declared in `branding.desc` (`productLogo`, `productIcon`, `productWelco
 - Boot menu title: "PromptLix OS" (text, done)
 - GNOME dark theme: applied on first login (Tokyo Night via `color-scheme: prefer-dark`)
 - GRUB menu entry: "PromptLix" (text, done)
-- Window title: "PromptLix Assistant" (text, done)
+- Window title: "AIDO" (the assistant app) ✅ (text, done)
 - GDM login screen: default Debian GDM — unbranded, optional to theme
 
 ## 5. Optional extras (none exist today)

@@ -1,5 +1,5 @@
 #!/bin/bash
-# PromptLix Assistant installer script
+# AIDO (PromptLix assistant) installer script
 # Installs the web assistant: local server + web UI + desktop webview.
 
 set -e
@@ -10,7 +10,7 @@ WEB_DIR="$INSTALL_DIR/web"
 DESKTOP_DIR="/usr/share/applications"
 BIN_DIR="/usr/local/bin"
 
-echo "Installing PromptLix Assistant..."
+echo "Installing AIDO (the PromptLix assistant)..."
 
 # Create directories
 mkdir -p "$INSTALL_DIR" "$ASSETS_DIR" "$WEB_DIR" "$DESKTOP_DIR" "$BIN_DIR"
@@ -35,6 +35,6 @@ chmod +x "$BIN_DIR/promptlix"
 pip3 install -r requirements.txt 2>/dev/null || \
     (apt-get install -y python3-pip && pip3 install -r requirements.txt)
 
-echo "PromptLix Assistant installed to $INSTALL_DIR"
+echo "AIDO (PromptLix assistant) installed to $INSTALL_DIR"
 echo "  Launch with: promptlix"
 echo "  Server: http://127.0.0.1:18437 (hidden port, token-protected)"

@@ -101,7 +101,7 @@ xdotool
 x11-utils
 wmctrl
 
-# ── Python (PromptLix Assistant + AIDO) ──
+# ── Python (AIDO assistant + AIDO Local) ──
 python3
 python3-pip
 python3-gi
@@ -251,7 +251,7 @@ DESKTOP
 
 cat > "$INCLUDES/usr/share/applications/aido.desktop" << 'DESKTOP'
 [Desktop Entry]
-Name=AIDO — Local AI
+Name=AIDO Local
 Comment=Offline AI desktop operator (local model, no cloud)
 Exec=/usr/local/bin/aido --gui
 Icon=utilities-terminal

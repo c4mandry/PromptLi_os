@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>PromptLix</title>
+<title>AIDO</title>
 <style>
   :root {
     --bg: #101014;
@@ -270,7 +270,7 @@
 <div id="app">
   <aside>
     <div class="traffic"><span class="r"></span><span class="y"></span><span class="g"></span></div>
-    <div class="brand"><span class="dot" id="conn-dot"></span>PromptLix</div>
+    <div class="brand"><span class="dot" id="conn-dot"></span>AIDO</div>
     <button class="nav-btn active" id="btn-new">
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 3v10M3 8h10"/></svg>
       New Chat
@@ -296,13 +296,13 @@
 
   <main>
     <header>
-      <span class="title">PromptLix Assistant</span>
+      <span class="title">AIDO</span>
       <span class="badge" id="provider-badge">—</span>
     </header>
     <div id="chat"></div>
     <div id="composer">
       <div class="composer-box">
-        <textarea id="input" rows="1" placeholder="Ask PromptLix anything — it has full access to this computer"></textarea>
+        <textarea id="input" rows="1" placeholder="Ask AIDO anything — it has full access to this computer"></textarea>
         <button id="send" title="Send">↑</button>
       </div>
     </div>
@@ -451,7 +451,7 @@
     msg.className = "msg " + role;
     const av = document.createElement("div");
     av.className = "avatar";
-    av.textContent = role === "user" ? "U" : "P";
+    av.textContent = role === "user" ? "U" : "A";
     const bubble = document.createElement("div");
     bubble.className = "bubble";
     msg.appendChild(av);
@@ -463,7 +463,7 @@
   }
   function welcome() {
     addMessage("assistant",
-      "**Welcome to PromptLix.** I'm your system assistant with full access to this computer.\n\n" +
+      "**Welcome to AIDO.** I'm your system assistant with full access to this computer.\n\n" +
       "- I can run shell commands, manage files and packages, and control the desktop\n" +
       "- I see your open windows live (positions, sizes, fullscreen state)\n" +
       "- Suggest commands and I'll show Run buttons you approve\n\n" +
