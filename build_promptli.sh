@@ -21,8 +21,11 @@ echo "  3. Output: promptli-os-1.0.0-amd64.iso"
 echo ""
 
 ISO_NAME="promptli-os-1.0.0-amd64"
-BUILD_DIR="/tmp/promptli-build"
-OUTPUT_DIR="$HOME/promptli-os-output"
+# NOTE: /tmp on this host is a tmpfs mounted with 'nodev', which breaks
+# device-node creation inside the chroot (debootstrap/dpkg need /dev/null,
+# /dev/pts, etc.). Build under a real filesystem (/ is ext4) instead.
+BUILD_DIR="/var/tmp/promptli-build"
+OUTPUT_DIR="${PROMPTLI_OUTPUT_DIR:-$HOME/promptli-os-output}"
 
 # ── Check that we are on x86_64 ──────────────────────────
 ARCH=$(uname -m)
@@ -875,10 +878,11 @@ lb build 2>&1 | tee "$BUILD_DIR/build.log"
 
 # Copy output
 mkdir -p "$OUTPUT_DIR"
-if [ -f live-image-amd64.hybrid.iso ]; then
-    cp live-image-amd64.hybrid.iso "$OUTPUT_DIR/$ISO_NAME.iso"
-elif [ -f *.iso ]; then
-    cp *.iso "$OUTPUT_DIR/$ISO_NAME.iso"
+ISO_OUTPUT=$(find . -maxdepth 2 -name '*.iso' -print -quit)
+if [ -n "$ISO_OUTPUT" ]; then
+    cp "$ISO_OUTPUT" "$OUTPUT_DIR/$ISO_NAME.iso"
+else
+    echo "WARNING: no ISO found in build tree."
 fi
 
 echo ""
