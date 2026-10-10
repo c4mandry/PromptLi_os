@@ -1,0 +1,37 @@
+[package]
+name = "promptli-installer"
+version = "0.1.0"
+edition = "2021"
+description = "TUI installer + updater for promptLi OS (minimal, server-focused Debian derivative)"
+license = "MIT"
+
+[[bin]]
+name = "promptli-install"
+path = "src/main.rs"
+
+# We build a single binary that dispatches on argv[0] / subcommand:
+#   promptli-install            -> interactive TUI installer
+#   promptli-update [--check]   -> check/apply updates from the website
+# A tiny `promptli-update` hardlink/renamed copy dispatches via argv[0].
+
+[dependencies]
+# Terminal UI (modern, no system deps)
+ratatui = "0.28"
+crossterm = "0.28"
+
+# (crossterm doesn't need these features; kept minimal)
+
+# Serialization for /etc/promptli/install.json + API JSON
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Lightweight HTTP client with rustls (no OpenSSL system dep) for the website callback
+ureq = { version = "2", features = ["json", "rustls"] }
+
+# Release-mode optimization for a small/fast binary
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

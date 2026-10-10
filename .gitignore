@@ -7,6 +7,13 @@ uzip/
 promptli-os/build/work/
 promptli-os/build/output/
 
+# ISO + release artifacts (large / generated at build time)
+output/
+
+# Compiled Rust installer binary (build from promptli-installer/)
+promptli-install
+promptli-installer/target/
+
 # Python
 __pycache__/
 *.pyc

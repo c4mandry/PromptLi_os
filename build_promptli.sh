@@ -12,11 +12,10 @@ echo "================================================"
 echo ""
 echo "This script will:"
 echo "  1. Install build dependencies (live-build etc.)"
-echo "  2. Build a custom Debian live ISO with:"
-echo "     - i3 window manager (Tokyo Night theme)"
+echo "  2. Build a custom, minimal Debian live ISO (server-focused, no WM/DE):"
 echo "     - promptLi AI Assistant (Claude API + system control)"
 echo "     - locakHost web server (terminal: just type 'locakhost')"
-echo "     - Zen Browser (installed on first boot)"
+echo "     - Rust TUI installer (promptli-install) + updater (promptli-update)"
 echo "  3. Output: promptli-os-1.0.0-amd64.iso"
 echo ""
 
@@ -68,51 +67,39 @@ lb config noauto \
 # ── Package list ─────────────────────────────────────────
 echo "[*] Setting package list..."
 cat > config/package-lists/promptli.list.chroot << 'PACKAGES'
-# Base
-xorg xinit x11-xserver-utils xterm
+# promptLi OS — minimal, server-focused base.
+# No window manager, no desktop environment, no Xorg — boots to a console TTY.
 
-# i3 Window Manager
-i3-wm i3status i3lock dmenu suckless-tools
+# Base system & boot
+linux-image-amd64 live-boot live-config live-tools
+systemd-sysv sudo adduser
 
-# Display & Compositing
-picom feh xcompmgr
-
-# Fonts
-fonts-jetbrains-mono fonts-font-awesome fonts-noto fonts-noto-cjk
+# Console / terminal utilities
+curl wget git vim htop unzip p7zip-full less
+rsync ca-certificates
 
 # Networking
-network-manager network-manager-gnome wireless-tools wpasupplicant
+network-manager wireless-tools wpasupplicant iproute2 iw
 
-# Audio
-pulseaudio pavucontrol alsa-utils
+# Disk / provisioning (used by the Rust installer)
+parted sfdisk fdisk util-linux dosfstools
+squashfs-tools gdisk cryptsetup
 
-# Utilities
-curl wget git vim htop unzip p7zip-full
-scrot xclip brightnessctl arandr lxappearance
+# Bootloader (installed to disk by the installer)
+grub-pc grub-efi-amd64 grub-efi-amd64-bin os-prober
 
-# Python (for promptLi Assistant)
-python3 python3-pip python3-tk python3-pil python3-pil.imagetk
+# Python (for the promptLi assistant & locakHost CLI tools)
+python3 python3-pip
 
-# Terminal
-alacritty
-
-# File Manager
-thunar gvfs gvfs-backends
-
-# Login Manager
-lightdm lightdm-gtk-greeter
-
-# System
-sudo polkitd pkexec
-libasound2 libdbus-glib-1-2 libgtk-3-0 libfuse2 fuse
-rsync
+# Rust runtime is NOT required — the installer ships as a static-ish binary.
+PACKAGES
 PACKAGES
 
 # ── Create project files ─────────────────────────────────
 echo "[*] Creating promptLi project files..."
 
 PROJECT_DIR="$BUILD_DIR/promptli-project"
-mkdir -p "$PROJECT_DIR"/{assistant/assets,config/i3,config/autostart,tools}
+mkdir -p "$PROJECT_DIR"/{assistant/assets,tools}
 
 # --- promptLi Assistant ---
 cat > "$PROJECT_DIR/assistant/promptli_assistant.py" << 'PYEOF'
@@ -600,141 +587,6 @@ if __name__ == "__main__":
     root = tk.Tk(); App(root); root.mainloop()
 PYEOF
 
-# --- i3 config ---
-cat > "$PROJECT_DIR/config/i3/config" << 'EOF'
-set $mod Mod4
-font pango:JetBrains Mono 10
-gaps inner 8; gaps outer 4
-
-set $bg #1a1b26; set $fg #c0caf5; set $accent #bb9af7
-set $red #f7768e; set $green #9ece6a; set $inactive #3b4261
-
-client.focused $accent $bg $fg $accent $accent
-client.unfocused $bg $bg $fg $bg $bg
-client.urgent $red $red $fg $red $red
-
-bindsym $mod+Return exec alacritty
-bindsym $mod+space exec promptli
-bindsym $mod+d exec "dmenu_run -fn 'JetBrains Mono-10' -nb '$bg' -nf '$fg' -sb '$accent' -sf '$bg'"
-bindsym $mod+Shift+q kill
-bindsym $mod+h focus left; bindsym $mod+j focus down
-bindsym $mod+k focus up; bindsym $mod+l focus right
-bindsym $mod+Shift+h move left; bindsym $mod+Shift+j move down
-bindsym $mod+Shift+k move up; bindsym $mod+Shift+l move right
-bindsym $mod+v split vertical; bindsym $mod+b split horizontal
-bindsym $mod+f fullscreen toggle
-bindsym $mod+Shift+space floating toggle
-
-bindsym $mod+r mode "resize"
-mode "resize" {
-    bindsym h resize shrink width 10 px or 10 ppt
-    bindsym j resize grow height 10 px or 10 ppt
-    bindsym k resize shrink height 10 px or 10 ppt
-    bindsym l resize grow width 10 px or 10 ppt
-    bindsym Return mode "default"; bindsym Escape mode "default"
-}
-
-set $ws1 "1"; set $ws2 "2"; set $ws3 "3"; set $ws4 "4"; set $ws5 "5"
-bindsym $mod+1 workspace $ws1; bindsym $mod+2 workspace $ws2
-bindsym $mod+3 workspace $ws3; bindsym $mod+4 workspace $ws4
-bindsym $mod+5 workspace $ws5
-bindsym $mod+Shift+1 move container to workspace $ws1
-bindsym $mod+Shift+2 move container to workspace $ws2
-bindsym $mod+Shift+3 move container to workspace $ws3
-bindsym $mod+Shift+4 move container to workspace $ws4
-bindsym $mod+Shift+5 move container to workspace $ws5
-
-bindsym $mod+Shift+c reload; bindsym $mod+Shift+r restart
-bindsym $mod+Shift+e exec "i3-nagbar -t warning -m 'Exit i3?' -b 'Yes' 'i3-msg exit'"
-bindsym XF86AudioRaiseVolume exec pactl set-sink-volume @DEFAULT_SINK@ +5%
-bindsym XF86AudioLowerVolume exec pactl set-sink-volume @DEFAULT_SINK@ -5%
-bindsym XF86AudioMute exec pactl set-sink-mute @DEFAULT_SINK@ toggle
-bindsym Print exec "scrot '%Y-%m-%d_%H%M%S.png' -e 'mv $f ~/Pictures/'"
-
-bar {
-    position top; status_command i3status
-    colors {
-        background $bg; statusline $fg; separator $inactive
-        focused_workspace $accent $accent $bg
-        active_workspace $inactive $inactive $fg
-        inactive_workspace $bg $bg $fg
-        urgent_workspace $red $red $fg
-    }
-    font pango:JetBrains Mono 10
-}
-
-exec --no-startup-id feh --bg-fill /opt/promptli/assets/wallpaper.svg
-exec --no-startup-id picom -b
-exec --no-startup-id ~/.config/autostart.sh
-for_window [class="promptli"] floating enable, resize set 900 650
-for_window [class="LocakHost"] floating enable
-EOF
-
-# --- i3status config ---
-cat > "$PROJECT_DIR/config/i3/i3status.conf" << 'EOF'
-general { colors = true; color_good = "#9ece6a"; color_bad = "#f7768e"; color_degraded = "#e0af68"; interval = 5 }
-order += "disk /"
-order += "wireless _first_"
-order += "ethernet _first_"
-order += "battery all"
-order += "load"
-order += "memory"
-order += "tztime local"
-wireless _first_ { format_up = "W: %quality %essid"; format_down = "W: down" }
-ethernet _first_ { format_up = "E: %ip"; format_down = "E: down" }
-battery all { format = "%status %percentage %remaining" }
-disk "/" { format = "💾 %avail" }
-load { format = "⚡ %1min" }
-memory { format = "🧠 %used/%total" }
-tztime local { format = "📅 %Y-%m-%d %H:%M" }
-EOF
-
-# --- Autostart ---
-cat > "$PROJECT_DIR/config/autostart/autostart.sh" << 'EOF'
-#!/bin/sh
-picom -b &
-feh --bg-fill /opt/promptli/assets/wallpaper.svg &
-nm-applet &
-promptli &
-EOF
-chmod +x "$PROJECT_DIR/config/autostart/autostart.sh"
-
-# --- Wallpaper SVG ---
-cat > "$PROJECT_DIR/assistant/assets/wallpaper.svg" << 'EOF'
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080">
-  <defs>
-    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#1a1b26"/>
-      <stop offset="100%" style="stop-color:#16161e"/>
-    </linearGradient>
-    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#bb9af7"/>
-      <stop offset="100%" style="stop-color:#7aa2f7"/>
-    </linearGradient>
-  </defs>
-  <rect width="1920" height="1080" fill="url(#bg)"/>
-  <g opacity="0.03" stroke="#c0caf5" stroke-width="0.5">
-    <line x1="0" y1="0" x2="1920" y2="0"/><line x1="0" y1="60" x2="1920" y2="60"/>
-    <line x1="0" y1="120" x2="1920" y2="120"/><line x1="0" y1="180" x2="1920" y2="180"/>
-    <line x1="0" y1="240" x2="1920" y2="240"/><line x1="0" y1="300" x2="1920" y2="300"/>
-    <line x1="0" y1="360" x2="1920" y2="360"/><line x1="0" y1="420" x2="1920" y2="420"/>
-    <line x1="0" y1="480" x2="1920" y2="480"/><line x1="0" y1="540" x2="1920" y2="540"/>
-    <line x1="0" y1="600" x2="1920" y2="600"/><line x1="0" y1="660" x2="1920" y2="660"/>
-    <line x1="0" y1="720" x2="1920" y2="720"/><line x1="0" y1="780" x2="1920" y2="780"/>
-    <line x1="0" y1="840" x2="1920" y2="840"/><line x1="0" y1="900" x2="1920" y2="900"/>
-    <line x1="0" y1="960" x2="1920" y2="960"/><line x1="0" y1="1020" x2="1920" y2="1020"/>
-  </g>
-  <g transform="translate(960, 440)">
-    <circle cx="0" cy="0" r="130" fill="none" stroke="url(#accent)" stroke-width="2" opacity="0.1"/>
-    <circle cx="0" cy="0" r="110" fill="none" stroke="url(#accent)" stroke-width="1" opacity="0.15"/>
-    <circle cx="0" cy="0" r="90" fill="none" stroke="url(#accent)" stroke-width="1" opacity="0.2"/>
-    <polygon points="-18,-70 12,-12 0,-12 30,70 -12,12 0,12" fill="url(#accent)" opacity="0.9"/>
-  </g>
-  <text x="960" y="640" text-anchor="middle" font-family="monospace" font-size="48" font-weight="bold" fill="#bb9af7" opacity="0.9">promptLi OS</text>
-  <text x="960" y="680" text-anchor="middle" font-family="monospace" font-size="16" fill="#565f89" opacity="0.7">AI-powered system assistant • Debian 13</text>
-</svg>
-EOF
-
 # ── Copy files into the live-build includes tree ────────
 echo "[*] Copying files into chroot..."
 
@@ -747,7 +599,6 @@ mkdir -p "$INCLUDES/opt/promptli"/{assets,tools}
 cp "$PROJECT_DIR/assistant/promptli_assistant.py" "$INCLUDES/opt/promptli/"
 cp "$PROJECT_DIR/assistant/promptli_daemon.py" "$INCLUDES/opt/promptli/"
 cp "$PROJECT_DIR/assistant/requirements.txt" "$INCLUDES/opt/promptli/"
-cp "$PROJECT_DIR/assistant/assets/wallpaper.svg" "$INCLUDES/opt/promptli/assets/"
 cp "$PROJECT_DIR/tools/locakhost.py" "$INCLUDES/opt/promptli/tools/"
 
 # Desktop entries
@@ -766,71 +617,51 @@ cat > "$INCLUDES/usr/local/bin/locakhost" << 'X'; chmod +x "$INCLUDES/usr/local/
 exec python3 /opt/promptli/tools/locakhost.py "$@"
 X
 
-# i3 config
-mkdir -p "$INCLUDES/etc/skel/.config/i3" "$INCLUDES/etc/skel/.config/i3status"
-cp "$PROJECT_DIR/config/i3/config" "$INCLUDES/etc/skel/.config/i3/config"
-cp "$PROJECT_DIR/config/i3/i3status.conf" "$INCLUDES/etc/skel/.config/i3status/config"
+# ── Rust installer + updater ────────────────────────────────
+# The installer is built from promptli-installer/ (Cargo) and installed as:
+#   /usr/local/bin/promptli-install   (TUI installer)
+#   /usr/local/bin/promptli-update    (hardlink/copy — dispatches via argv[0])
+#
+# Source: prefer the repo's compiled release binary; allow override via env.
+SCRIPT_DIR_REPO="$(cd "$(dirname "$0")" && pwd)"
+INSTALLER_SRC="${PROMPTLI_INSTALLER_BIN:-$SCRIPT_DIR_REPO/promptli-install}"
+if [ ! -f "$INSTALLER_SRC" ] && [ -f "$SCRIPT_DIR_REPO/promptli-installer/target/release/promptli-install" ]; then
+    INSTALLER_SRC="$SCRIPT_DIR_REPO/promptli-installer/target/release/promptli-install"
+fi
+if [ -f "$INSTALLER_SRC" ]; then
+    cp "$INSTALLER_SRC" "$INCLUDES/usr/local/bin/promptli-install"
+    cp "$INSTALLER_SRC" "$INCLUDES/usr/local/bin/promptli-update"
+    chmod +x "$INCLUDES/usr/local/bin/promptli-install" "$INCLUDES/usr/local/bin/promptli-update"
+    echo "[✓] Bundled Rust installer from $INSTALLER_SRC"
+else
+    echo "[!] Warning: installer binary not found at $INSTALLER_SRC (run cargo build --release first)"
+fi
 
-# Autostart
-cp "$PROJECT_DIR/config/autostart/autostart.sh" "$INCLUDES/etc/skel/.config/autostart.sh"
-chmod +x "$INCLUDES/etc/skel/.config/autostart.sh"
+# ── Console login notice (MOTD) ───────────────────────────
+mkdir -p "$INCLUDES/etc"
+cat > "$INCLUDES/etc/motd" << 'X'
 
-# picom config
-mkdir -p "$INCLUDES/etc/skel/.config/picom"
-cat > "$INCLUDES/etc/skel/.config/picom/picom.conf" << 'X'
-backend = "glx";
-vsync = true;
-shadow = true;
-shadow-radius = 12;
-shadow-opacity = 0.5;
-shadow-offset-x = -8;
-shadow-offset-y = -8;
-fading = true;
-inactive-opacity = 0.9;
-corner-radius = 8;
+  ⚡ promptLi OS — minimal server-focused Debian
+
+  Docs:        https://webnotes.work/os
+  Assistant:   promptli
+  Web server:  locakhost
+  Installer:   promptli-install
+  Update:      promptli-update --check
+
 X
 
-# LightDM autologin
-mkdir -p "$INCLUDES/etc/lightdm"
-cat > "$INCLUDES/etc/lightdm/lightdm.conf" << 'X'
-[Seat:*]
-autologin-user=promptli
-autologin-user-timeout=0
-user-session=i3
-greeter-session=lightdm-gtk-greeter
-X
-
-# First-boot setup service
+# ── First-boot setup service ────────────────────────────────
 cat > "$INCLUDES/opt/promptli/setup.sh" << 'X'; chmod +x "$INCLUDES/opt/promptli/setup.sh"
 #!/bin/sh
+# Create the default user + install Python deps for the assistant CLI tools.
 if ! id promptli >/dev/null 2>&1; then
-    useradd -m -s /bin/sh -G sudo,audio,video,netdev promptli
+    useradd -m -s /bin/bash -G sudo netdev promptli
     echo "promptli:promptli" | chpasswd
     cp -r /etc/skel/. /home/promptli/
     chown -R promptli:promptli /home/promptli
 fi
-pip3 install --break-system-packages anthropic openai 2>/dev/null || true
-# Zen Browser
-if [ ! -f /opt/zen-browser/zen ]; then
-    echo "Installing Zen Browser..."
-    mkdir -p /opt/zen-browser
-    wget -q "https://github.com/zen-browser/desktop/releases/latest/download/zen.linux-x86_64.tar.xz" -O /tmp/zen.tar.xz
-    tar -xf /tmp/zen.tar.xz -C /opt/zen-browser/ --strip-components=1
-    rm /tmp/zen.tar.xz
-    ln -sf /opt/zen-browser/zen /usr/local/bin/zen-browser
-    update-alternatives --install /usr/bin/x-www-browser x-www-browser /opt/zen-browser/zen 100
-    update-alternatives --set x-www-browser /opt/zen-browser/zen
-fi
-cat > /usr/share/applications/zen-browser.desktop << "ZEN"
-[Desktop Entry]
-Name=Zen Browser
-Exec=/opt/zen-browser/zen %u
-Icon=/opt/zen-browser/browser/chrome/icons/default/default128.png
-Type=Application
-Categories=Network;WebBrowser;
-MimeType=text/html;text/xml;application/xhtml+xml;x-scheme-handler/http;x-scheme-handler/https;
-Terminal=false
-ZEN
+pip3 install --break-system-packages anthropic 2>/dev/null || true
 systemctl disable promptli-setup.service 2>/dev/null || true
 X
 
@@ -852,10 +683,6 @@ ln -sf /etc/systemd/system/promptli-setup.service "$INCLUDES/etc/systemd/system/
 
 # Hostname
 echo "promptli" > "$INCLUDES/etc/hostname"
-
-# Enable LightDM
-mkdir -p "$INCLUDES/etc/systemd/system"
-ln -sf /lib/systemd/system/lightdm.service "$INCLUDES/etc/systemd/system/display-manager.service" 2>/dev/null || true
 
 # ── Hooks ───────────────────────────────────────────────
 mkdir -p config/hooks/normal
