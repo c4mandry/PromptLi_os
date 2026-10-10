@@ -1,0 +1,9 @@
+# AIDO runtime dependencies (all MIT/Apache-2.0 licensed).
+# Light install:  pip install -r requirements.txt
+#
+# The heavy optional backends are lazy-loaded and can be installed separately:
+#   LLM backend:   pip install llama-cpp-python
+#   Browser tools: pip install playwright
+# Development extras (pytest) are in setup.py: pip install -e ".[dev]"
+PyYAML>=6.0.1
+requests>=2.31.0

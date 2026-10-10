@@ -84,6 +84,7 @@ pub fn run_install(
     progress("Writing configuration");
     write_hostname(target_dir, &opts.hostname)?;
     write_fstab(target_dir, &parts)?;
+    enable_serial_console(target_dir)?;
     create_user(target_dir, &opts.username, &opts.password)?;
 
     // ── Bootloader ────────────────────────────────────────
@@ -149,6 +150,54 @@ fn write_fstab(root: &Path, parts: &PartitionResult) -> io::Result<()> {
     Ok(())
 }
 
+/// Enable the serial console on the installed system — promptLi OS is a
+/// server distro, so ttyS0 (IPMI/headless/VPS consoles) should work out of
+/// the box, alongside the regular VGA tty.
+fn enable_serial_console(root: &Path) -> io::Result<()> {
+    let grub_defaults = root.join("etc/default/grub");
+    let mut content = std::fs::read_to_string(&grub_defaults).unwrap_or_default();
+
+    // Set (or replace) a GRUB_* key with a single value in the defaults file.
+    fn ensure(content: &mut String, key: &str, value: &str) {
+        let line = format!("{key}=\"{value}\"");
+        let mut found = false;
+        let mut out = String::new();
+        for l in content.lines() {
+            let trimmed = l.trim_start();
+            let matched = trimmed.starts_with(key)
+                && !trimmed.starts_with(&format!("{key}_"));
+            if matched && !found {
+                out.push_str(&line);
+                out.push('\n');
+                found = true;
+            } else {
+                out.push_str(l);
+                out.push('\n');
+            }
+        }
+        if !found {
+            out.push_str(&line);
+            out.push('\n');
+        }
+        *content = out;
+    }
+
+    ensure(
+        &mut content,
+        "GRUB_CMDLINE_LINUX",
+        "console=tty0 console=ttyS0,115200",
+    );
+    ensure(&mut content, "GRUB_TERMINAL", "console serial");
+    ensure(
+        &mut content,
+        "GRUB_SERIAL_COMMAND",
+        "serial --speed=115200 --unit=0 --word=8 --parity=no --stop=1",
+    );
+
+    std::fs::write(&grub_defaults, content)?;
+    Ok(())
+}
+
 fn blkid_uuid(dev: &str) -> io::Result<String> {
     let out = run("blkid", &["-s", "UUID", "-o", "value", dev])?;
     let uuid = String::from_utf8_lossy(&out.stdout).trim().to_string();
@@ -159,9 +208,9 @@ fn blkid_uuid(dev: &str) -> io::Result<String> {
 }
 
 fn create_user(root: &Path, username: &str, password: &str) -> io::Result<()> {
-    // Use chroot + useradd + chpasswd.
+    // Use chroot + useradd + chpasswd. zsh is the promptLi default shell.
     let script = format!(
-        "useradd -m -s /bin/bash -G sudo,audio,video {u} 2>/dev/null || true; \
+        "useradd -m -s /usr/bin/zsh -G sudo,netdev {u} 2>/dev/null || true; \
          echo '{u}:{p}' | chpasswd",
         u = username,
         p = password
@@ -174,21 +223,36 @@ fn install_bootloader(root: &Path, parts: &PartitionResult) -> io::Result<()> {
     // Determine the parent disk device of the root partition.
     let disk_dev = physical_disk(&parts.root);
 
-    match parts.layout {
+    // grub-install needs the host's devices inside the target chroot
+    // (the static /dev of the fresh root has no /dev/vda etc.).
+    let mut mounted: Vec<std::path::PathBuf> = Vec::new();
+    for m in ["/dev", "/proc", "/sys"] {
+        let dst = root.join(m.trim_start_matches('/'));
+        if proc::run("mount", &["--bind", m, dst.to_str().unwrap_or("")]).is_ok() {
+            mounted.push(dst);
+        }
+    }
+
+    let result = match parts.layout {
         PartitionScheme::Efi => {
             // grub-install for EFI uses the chroot; EFI dir mounted at /boot/efi.
             let script = "grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=promptLi --recheck && update-grub";
-            run("chroot", &[root.to_str().unwrap_or(""), "/bin/sh", "-c", script])?;
+            run("chroot", &[root.to_str().unwrap_or(""), "/bin/sh", "-c", script])
         }
         PartitionScheme::Bios => {
             let script = format!(
                 "grub-install --target=i386-pc --recheck {disk} && update-grub",
                 disk = disk_dev
             );
-            run("chroot", &[root.to_str().unwrap_or(""), "/bin/sh", "-c", &script])?;
+            run("chroot", &[root.to_str().unwrap_or(""), "/bin/sh", "-c", &script])
         }
+    };
+
+    // Unmount in reverse order (best-effort).
+    for dst in mounted.iter().rev() {
+        umount(dst);
     }
-    Ok(())
+    result.map(|_| ())
 }
 
 /// Strip a trailing partition suffix to get the physical disk, e.g.

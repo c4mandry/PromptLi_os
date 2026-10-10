@@ -26,6 +26,10 @@ ISO_NAME="promptli-os-1.0.0-amd64"
 BUILD_DIR="/var/tmp/promptli-build"
 OUTPUT_DIR="${PROMPTLI_OUTPUT_DIR:-$HOME/promptli-os-output}"
 
+# Absolute path of this repo — captured BEFORE any `cd` so the build can
+# find sibling sources (aido/, the Rust installer binary) from anywhere.
+SCRIPT_DIR_REPO="$(cd "$(dirname "$0")" && pwd)"
+
 # ── Check that we are on x86_64 ──────────────────────────
 ARCH=$(uname -m)
 if [ "$ARCH" != "x86_64" ]; then
@@ -55,7 +59,7 @@ lb config noauto \
     --architecture amd64 \
     --distribution trixie \
     --archive-areas "main contrib non-free non-free-firmware" \
-    --bootappend-live "boot=live components quiet splash" \
+    --bootappend-live "boot=live components quiet" \
     --debian-installer none \
     --iso-application "promptLi OS" \
     --iso-publisher "promptLi" \
@@ -74,25 +78,37 @@ cat > config/package-lists/promptli.list.chroot << 'PACKAGES'
 linux-image-amd64 live-boot live-config live-tools
 systemd-sysv sudo adduser
 
-# Console / terminal utilities
+# Shell: zsh with autosuggestions + syntax highlighting
+zsh zsh-autosuggestions zsh-syntax-highlighting zsh-common
+
+# Modern terminal tools
+fastfetch fzf eza bat ripgrep fd-find zoxide btop tmux
+
+# Console utilities
 curl wget git vim htop unzip p7zip-full less
 rsync ca-certificates
 
 # Networking
 network-manager wireless-tools wpasupplicant iproute2 iw
 
-# Disk / provisioning (used by the Rust installer)
-parted sfdisk fdisk util-linux dosfstools
+# Disk / provisioning (used by the Rust installer; sfdisk ships in util-linux)
+parted fdisk util-linux dosfstools
 squashfs-tools gdisk cryptsetup
 
-# Bootloader (installed to disk by the installer)
-grub-pc grub-efi-amd64 grub-efi-amd64-bin os-prober
+# Bootloader (installed to disk by the installer; grub-pc-bin avoids the
+# interactive device prompt that grub-pc's postinst would trigger in-chroot)
+grub-pc-bin grub-efi-amd64 grub-efi-amd64-bin os-prober
 
-# Python (for the promptLi assistant & locakHost CLI tools)
-python3 python3-pip
+# Arch-style package tooling: pacman binary + (AUR via makedeb/mist, added
+# from the vendored .deb in a chroot hook; gnupg is needed for its keyring).
+# These are makedeb's runtime dependencies.
+pacman-package-manager gnupg
+build-essential binutils fakeroot file gettext gawk libarchive-tools lsb-release zstd
+
+# Python (for aido, the promptLi assistant & locakHost CLI tools)
+python3 python3-pip python3-venv python3-yaml python3-requests
 
 # Rust runtime is NOT required — the installer ships as a static-ish binary.
-PACKAGES
 PACKAGES
 
 # ── Create project files ─────────────────────────────────
@@ -623,7 +639,6 @@ X
 #   /usr/local/bin/promptli-update    (hardlink/copy — dispatches via argv[0])
 #
 # Source: prefer the repo's compiled release binary; allow override via env.
-SCRIPT_DIR_REPO="$(cd "$(dirname "$0")" && pwd)"
 INSTALLER_SRC="${PROMPTLI_INSTALLER_BIN:-$SCRIPT_DIR_REPO/promptli-install}"
 if [ ! -f "$INSTALLER_SRC" ] && [ -f "$SCRIPT_DIR_REPO/promptli-installer/target/release/promptli-install" ]; then
     INSTALLER_SRC="$SCRIPT_DIR_REPO/promptli-installer/target/release/promptli-install"
@@ -637,31 +652,223 @@ else
     echo "[!] Warning: installer binary not found at $INSTALLER_SRC (run cargo build --release first)"
 fi
 
-# ── Console login notice (MOTD) ───────────────────────────
+# ── AIDO: terminal-first local AI assistant ────────────────
+# Ships from the aido/ source tree (GUI/tray/voice frontends removed).
+AIDO_SRC="$SCRIPT_DIR_REPO/aido"
+if [ -d "$AIDO_SRC/src" ]; then
+    mkdir -p "$INCLUDES/opt/aido"
+    cp -r "$AIDO_SRC/src" "$AIDO_SRC/config" "$INCLUDES/opt/aido/"
+    cp "$AIDO_SRC/requirements.txt" "$AIDO_SRC/setup.py" "$INCLUDES/opt/aido/" 2>/dev/null || true
+    cat > "$INCLUDES/usr/local/bin/aido" << 'X'; chmod +x "$INCLUDES/usr/local/bin/aido"
+#!/bin/sh
+# AIDO — local, private AI assistant (terminal edition).
+exec python3 /opt/aido/src/aido.py "$@"
+X
+    echo "[✓] Bundled AIDO assistant from $AIDO_SRC"
+else
+    echo "[!] Warning: aido/ source tree not found — assistant not bundled"
+fi
+
+# ── Vendored packages (makedeb .deb for AUR support) ────
+if [ -d "$SCRIPT_DIR_REPO/vendor" ]; then
+    mkdir -p "$INCLUDES/opt/promptli/vendor"
+    cp -r "$SCRIPT_DIR_REPO/vendor/." "$INCLUDES/opt/promptli/vendor/"
+    echo "[✓] Bundled vendor/ (makedeb etc.)"
+fi
+
+# ── OS identity: promptLi OS, not "Debian" ────────────────
+mkdir -p "$INCLUDES/etc" "$INCLUDES/usr/lib/os-release"
+cat > "$INCLUDES/etc/os-release" << 'X'
+PRETTY_NAME="promptLi OS 1.0.0 (L1-433)"
+NAME="promptLi OS"
+VERSION_ID="1.0.0"
+VERSION="1.0.0 (L1-433)"
+VERSION_CODENAME=l1-433
+ID=promptli
+ID_LIKE=debian
+HOME_URL="https://webnotes.work/os"
+SUPPORT_URL="https://webnotes.work/os"
+BUG_REPORT_URL="https://github.com/c4mandry/PromptLi_os/issues"
+LOGO=promptli
+ANSI_COLOR="38;2;187;154;247"
+X
+ln -sf /etc/os-release "$INCLUDES/usr/lib/os-release"
+
+# ── Console login notice (MOTD + /etc/issue) ─────────────
 mkdir -p "$INCLUDES/etc"
 cat > "$INCLUDES/etc/motd" << 'X'
 
-  ⚡ promptLi OS — minimal server-focused Debian
+  ⚡ promptLi OS 1.0.0 (L1-433) — minimal server-focused Debian
 
-  Docs:        https://webnotes.work/os
-  Assistant:   promptli
-  Web server:  locakhost
-  Installer:   promptli-install
-  Update:      promptli-update --check
+  Assistant:  aido            AI:           aido chat
+  AUR:        mist install X  Shell:        zsh
+  Installer:  promptli-install      Update:  promptli-update --check
+  Web server: locakhost       Docs:        https://webnotes.work/os
 
 X
+cat > "$INCLUDES/etc/issue" << 'X'
+\S{PRETTY_NAME} \n \l
+
+X
+
+# ── fastfetch: custom promptLi logo + identity ───────────
+mkdir -p "$INCLUDES/etc/fastfetch" "$INCLUDES/etc/skel/.config/fastfetch"
+cat > "$INCLUDES/etc/fastfetch/config.jsonc" << 'X'
+// promptLi OS fastfetch config — custom lightning-bolt logo + clean output.
+// Named ANSI colors only: the fastfetch in Debian 13 (2.40) predates hex RGB.
+{
+    "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
+    "logo": {
+        "type": "data",
+        "source": "$1        ▄▄▄\n$1       █████\n$2      ███████\n$2     █████████\n$3    ███████████\n$4   █████████████\n$5  ███████████████\n$5  ▀██████████████\n$4   ▀████████████\n$3    ▀██████████\n$2     ▀████████\n$2      ▀██████\n$1       ▀████\n$1        ▀██",
+        "color": {
+            "1": "bright_magenta",
+            "2": "bright_blue",
+            "3": "bright_cyan",
+            "4": "light_blue",
+            "5": "light_cyan"
+        },
+        "padding": { "left": 2 }
+    },
+    "display": {
+        "separator": " ➜ "
+    },
+    "modules": [
+        "title",
+        "separator",
+        "os",
+        "host",
+        "kernel",
+        "uptime",
+        "packages",
+        "shell",
+        "cpu",
+        "memory",
+        "disk",
+        "localip",
+        "colors"
+    ]
+}
+X
+cp "$INCLUDES/etc/fastfetch/config.jsonc" "$INCLUDES/etc/skel/.config/fastfetch/config.jsonc"
+
+# ── zsh: global config + per-user skel (looks good on old terminals) ──
+mkdir -p "$INCLUDES/etc/zsh" "$INCLUDES/etc/skel"
+cat > "$INCLUDES/etc/zsh/zshrc" << 'X'
+# promptLi OS — system-wide zsh configuration.
+# Works on 8-color and 256-color terminals alike (no truecolor required).
+
+# ── History ──────────────────────────────────────────────
+HISTFILE=~/.zsh_history
+HISTSIZE=10000
+SAVEHIST=10000
+setopt INC_APPEND_HISTORY SHARE_HISTORY EXTENDED_HISTORY HIST_IGNORE_DUPS
+
+# ── Completion ───────────────────────────────────────────
+autoload -Uz compinit && compinit -d ~/.zcompdump
+zstyle ':completion:*' menu select
+zstyle ':completion:*' matcher-list 'm:{a-zA-Z}={A-Za-z}'
+setopt AUTO_LIST AUTO_MENU COMPLETE_IN_WORD
+
+# ── Editing niceties ─────────────────────────────────────
+setopt AUTO_CD CORRECT INTERACTIVE_COMMENTS
+autoload -Uz edit-command-line
+zle -N edit-command-line
+bindkey '^X^E' edit-command-line
+
+# ── Prompt (bold, git-aware, safe for 8/16-color ttys) ───
+autoload -Uz vcs_info
+precmd() { vcs_info }
+zstyle ':vcs_info:git:*' formats '(%b)'
+zstyle ':vcs_info:*' enable git
+setopt PROMPT_SUBST
+PROMPT='%B%F{magenta}⚡%f%b %B%F{cyan}%~%f%b %F{yellow}${vcs_info_msg_0_}%f%(!.%F{red}%n@%m.%F{green}❯)%f '
+
+# ── Aliases (modern tools) ───────────────────────────────
+alias ls='eza --icons=never --color=auto --group-directories-first'
+alias ll='eza -lh --icons=never --color=auto --group-directories-first'
+alias la='eza -lah --icons=never --color=auto --group-directories-first'
+alias cat='batcat --paging=never --style=plain 2>/dev/null || cat'
+alias grep='grep --color=auto'
+alias tree='eza --tree --icons=never'
+alias mkdir='mkdir -pv'
+alias df='df -h'
+alias free='free -h'
+alias pacman='pacman --color auto'
+
+# ── Keybindings ──────────────────────────────────────────
+bindkey '^[[A' up-line-or-search
+bindkey '^[[B' down-line-or-search
+bindkey '^R' history-incremental-search-backward
+
+# ── Plugin setup (Debian packages) ───────────────────────
+source /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh 2>/dev/null
+source /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh 2>/dev/null
+ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=8'
+
+# ── promptLi autostart (sourced once per login shell) ────
+# Drop executable scripts in /etc/promptli/autostart.d/ (system-wide) or
+# ~/.config/promptli/autostart.d/ (user) — they run in zsh login shells.
+if [[ -o login && -z "$PROMPTLI_AUTOSTART_RAN" ]]; then
+    export PROMPTLI_AUTOSTART_RAN=1
+    for f in /etc/promptli/autostart.d/*(N.x) ~/.config/promptli/autostart.d/*(N.x); do
+        source "$f"
+    done
+fi
+
+# ── fzf + zoxide ─────────────────────────────────────────
+if command -v zoxide >/dev/null 2>&1; then
+    eval "$(zoxide init zsh)"
+fi
+if command -v fzf >/dev/null 2>&1; then
+    source /usr/share/doc/fzf/examples/key-bindings.zsh 2>/dev/null
+fi
+X
+cp "$INCLUDES/etc/zsh/zshrc" "$INCLUDES/etc/skel/.zshrc"
+
+# ── Autostart config system ──────────────────────────────
+mkdir -p "$INCLUDES/etc/promptli/autostart.d" "$INCLUDES/etc/skel/.config/promptli/autostart.d"
+cat > "$INCLUDES/etc/promptli/autostart.d/10-welcome.sh" << 'X'
+# promptLi autostart example — runs in zsh login shells.
+# Add your own scripts here (system) or ~/.config/promptli/autostart.d/ (user).
+if [[ -o interactive && -o login ]]; then
+    command -v fastfetch >/dev/null 2>&1 && fastfetch
+fi
+X
+chmod +x "$INCLUDES/etc/promptli/autostart.d/10-welcome.sh"
 
 # ── First-boot setup service ────────────────────────────────
 cat > "$INCLUDES/opt/promptli/setup.sh" << 'X'; chmod +x "$INCLUDES/opt/promptli/setup.sh"
 #!/bin/sh
-# Create the default user + install Python deps for the assistant CLI tools.
+# promptLi first-boot setup: user, zsh default, aido deps, AUR tooling.
 if ! id promptli >/dev/null 2>&1; then
-    useradd -m -s /bin/bash -G sudo netdev promptli
+    useradd -m -s /usr/bin/zsh -G sudo netdev promptli
     echo "promptli:promptli" | chpasswd
     cp -r /etc/skel/. /home/promptli/
     chown -R promptli:promptli /home/promptli
 fi
+chsh -s /usr/bin/zsh root 2>/dev/null || true
+# promptLi assistant (Claude API) deps — aido's own light deps (PyYAML,
+# requests) come from Debian packages, so no pip install is needed for it.
 pip3 install --break-system-packages anthropic 2>/dev/null || true
+# AUR: if mist isn't installed yet (makedeb repo was down during the build),
+# retry now that the machine is online.
+if ! command -v mist >/dev/null 2>&1; then
+    echo "  [*] Retrying mist install (AUR support)..."
+    wget -qO- --timeout=10 'https://proget.makedeb.org/releases/makedeb/makedeb.pub' 2>/dev/null | \
+        gpg --dearmor > /usr/share/keyrings/makedeb-archive-keyring.gpg 2>/dev/null || true
+    if [ -s /usr/share/keyrings/makedeb-archive-keyring.gpg ]; then
+        echo 'deb [signed-by=/usr/share/keyrings/makedeb-archive-keyring.gpg arch=all] https://proget.makedeb.org makedeb main' \
+            > /etc/apt/sources.list.d/makedeb.list
+        apt-get update -qq 2>/dev/null || true
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq mist 2>/dev/null || true
+    fi
+fi
+if command -v mist >/dev/null 2>&1; then
+    echo "  [✓] AUR ready: mist install <package>"
+else
+    echo "  [!] mist not available yet (makedeb repo offline) — run: aido \"install mist from AUR\" later, or check https://docs.makedeb.org"
+fi
 systemctl disable promptli-setup.service 2>/dev/null || true
 X
 
@@ -670,8 +877,7 @@ mkdir -p "$INCLUDES/etc/systemd/system/multi-user.target.wants"
 cat > "$INCLUDES/etc/systemd/system/promptli-setup.service" << 'X'
 [Unit]
 Description=promptLi first boot setup
-After=network.target network-online.target
-Wants=network-online.target
+After=network.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
@@ -689,9 +895,63 @@ mkdir -p config/hooks/normal
 cat > config/hooks/normal/9999-promptli-customize.hook.chroot << 'HOOK'
 #!/bin/bash
 echo "⚡ Customizing promptLi OS..."
-chown -R root:root /opt/promptli
-chmod +x /usr/local/bin/promptli /usr/local/bin/locakhost
+
+# ── AUR support: makedeb + mist (install AUR packages on Debian) ──
+# makedeb is vendored (vendor/makedeb/*.deb) so the build works offline;
+# mist comes from the makedeb repo and is retried at first boot if it's down.
+echo "  [*] Setting up AUR support (makedeb + mist)..."
+VENDOR_DEB=$(find /opt/promptli/vendor/makedeb -name '*.deb' 2>/dev/null | head -1)
+if [ -n "$VENDOR_DEB" ] && ! command -v makedeb >/dev/null 2>&1; then
+    # --force-overwrite: Debian's makepkg (a pacman dep) also ships
+    # /etc/makepkg.conf; makedeb's version is a compatible superset.
+    DEBIAN_FRONTEND=noninteractive dpkg -i --force-overwrite "$VENDOR_DEB" 2>/dev/null || true
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -f -qq 2>/dev/null || true
+fi
+# Try the makedeb repo for mist (may be offline; setup.sh retries on first boot).
+if ! command -v mist >/dev/null 2>&1; then
+    wget -qO- --timeout=10 'https://proget.makedeb.org/releases/makedeb/makedeb.pub' 2>/dev/null | \
+        gpg --dearmor > /usr/share/keyrings/makedeb-archive-keyring.gpg 2>/dev/null || true
+    if [ -s /usr/share/keyrings/makedeb-archive-keyring.gpg ]; then
+        echo 'deb [signed-by=/usr/share/keyrings/makedeb-archive-keyring.gpg arch=all] https://proget.makedeb.org makedeb main' \
+            > /etc/apt/sources.list.d/makedeb.list
+        apt-get update -qq 2>/dev/null || true
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq mist 2>/dev/null || true
+    fi
+fi
+if command -v makedeb >/dev/null 2>&1; then echo "  [✓] makedeb installed"; else echo "  [!] makedeb install failed"; fi
+if command -v mist >/dev/null 2>&1; then echo "  [✓] mist installed (AUR ready)"; else echo "  [!] mist not available yet (repo offline; retried at first boot)"; fi
+
+# ── Fast boot tweaks ────────────────────────────────────
+echo "  [*] Applying boot-speed tweaks..."
+# systemctl needs dbus, which doesn't exist inside a build chroot — masking
+# is just a symlink to /dev/null, so do that directly.
+for unit in systemd-networkd-wait-online.service \
+            NetworkManager-wait-online.service \
+            ModemManager.service \
+            apt-daily.timer apt-daily-upgrade.timer \
+            man-db.timer fstrim.timer; do
+    ln -sf /dev/null "/etc/systemd/system/$unit"
+done
+# Raise systemd's default timeout (older/slow disks) and keep quiet boot.
+mkdir -p /etc/systemd/system.conf.d
+printf '[Manager]\nDefaultTimeoutStartSec=45s\nDefaultTimeoutStopSec=20s\n' > /etc/systemd/system.conf.d/promptli.conf
+
+# ── Default user: created at build time (not first boot) ──
+echo "  [*] Creating default user 'promptli'..."
+if ! id promptli >/dev/null 2>&1; then
+    useradd -m -s /usr/bin/zsh -G sudo,netdev promptli
+    echo 'promptli:promptli' | chpasswd
+    cp -r /etc/skel/. /home/promptli/ 2>/dev/null || true
+    chown -R promptli:promptli /home/promptli
+fi
+chsh -s /usr/bin/zsh root 2>/dev/null || true
+
+# ── Permissions ─────────────────────────────────────────
+echo "  [*] Fixing permissions..."
+chown -R root:root /opt/promptli /opt/aido
+chmod +x /usr/local/bin/promptli /usr/local/bin/locakhost /usr/local/bin/aido
 chmod +x /opt/promptli/promptli_assistant.py /opt/promptli/promptli_daemon.py /opt/promptli/setup.sh
+chmod +x /opt/aido/src/aido.py
 echo "✅ Done."
 HOOK
 chmod +x config/hooks/normal/9999-promptli-customize.hook.chroot
@@ -711,6 +971,49 @@ if [ -n "$ISO_OUTPUT" ]; then
 else
     echo "WARNING: no ISO found in build tree."
 fi
+
+# (Re)generate the release manifest so the website /api/os/latest always
+# matches the freshly built ISO (sha256 + size are recomputed here).
+ISO_PATH="$OUTPUT_DIR/$ISO_NAME.iso"
+if [ -f "$ISO_PATH" ]; then
+    ISO_SHA=$(sha256sum "$ISO_PATH" | cut -d' ' -f1)
+    ISO_SIZE=$(stat -c %s "$ISO_PATH")
+    ISO_DATE=$(date -u +%Y-%m-%d)
+    cat > "$OUTPUT_DIR/latest.json" << JSON
+{
+  "name": "promptLi OS",
+  "version": "1.0.0",
+  "codename": "L1-433",
+  "base": "Debian 13 (trixie)",
+  "arch": "amd64",
+  "iso_filename": "$ISO_NAME.iso",
+  "iso_url": "/api/os/iso",
+  "sha256": "$ISO_SHA",
+  "size_bytes": $ISO_SIZE,
+  "released_at": "$ISO_DATE",
+  "release_notes": [
+    "Minimal, bloat-free base — no window manager, no desktop environment",
+    "aido — private, offline local AI assistant (terminal-first)",
+    "AUR support via mist (makedeb) + pacman",
+    "zsh with autosuggestions, syntax highlighting, and a git-aware prompt",
+    "Custom fastfetch identity with promptLi OS logo",
+    "Rust TUI installer (promptli-install) + self-updater (promptli-update)",
+    "Fast boot with quiet, minimal services",
+    "locakHost local web server"
+  ],
+  "default_credentials": {
+    "user": "promptli",
+    "password": "promptli"
+  }
+}
+JSON
+    echo "[✓] Regenerated $OUTPUT_DIR/latest.json (sha256 $ISO_SHA)"
+fi
+
+# The web server (running as the invoking user, not root) must be able to
+# write enrollments.jsonl + latest.json into this directory.
+OUT_OWNER="${SUDO_USER:-$(logname 2>/dev/null || echo root)}"
+chown "$OUT_OWNER":"$(id -gn "$OUT_OWNER" 2>/dev/null || echo root)" "$OUTPUT_DIR" "$OUTPUT_DIR/$ISO_NAME.iso" "$OUTPUT_DIR/latest.json" 2>/dev/null || true
 
 echo ""
 echo "================================================"

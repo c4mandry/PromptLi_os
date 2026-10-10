@@ -5,12 +5,34 @@ use crate::proc;
 use std::io;
 use std::path::Path;
 
+/// Parse a human-readable size from lsblk ("8G", "930M", "512K") into bytes.
+fn parse_size(s: &str) -> u64 {
+    let s = s.trim();
+    if s.is_empty() {
+        return 0;
+    }
+    // Plain number = bytes.
+    if let Ok(v) = s.parse::<u64>() {
+        return v;
+    }
+    let (num, suffix) = s.split_at(s.len() - 1);
+    let mult: u64 = match suffix {
+        "K" => 1 << 10,
+        "M" => 1 << 20,
+        "G" => 1 << 30,
+        "T" => 1 << 40,
+        "P" => 1 << 50,
+        _ => 1,
+    };
+    num.trim().parse::<f64>().map(|v| (v * mult as f64) as u64).unwrap_or(0)
+}
+
 /// Query block devices via lsblk and return candidate install targets:
 /// whole disks of a reasonable minimum size, excluding the live medium itself.
 pub fn discover_disks(min_bytes: u64) -> io::Result<Vec<Disk>> {
     let out = proc::run(
         "lsblk",
-        &["-J", "-d", "-o", "NAME,SIZE,MODEL,TRAN,RM"],
+        &["-J", "-b", "-d", "-o", "NAME,SIZE,MODEL,TRAN,RM"],
     )?;
     let json: serde_json::Value = serde_json::from_slice(&out.stdout).map_err(|e| {
         io::Error::new(io::ErrorKind::InvalidData, format!("bad lsblk output: {e}"))
@@ -20,13 +42,15 @@ pub fn discover_disks(min_bytes: u64) -> io::Result<Vec<Disk>> {
     if let Some(items) = json["blockdevices"].as_array() {
         for dev in items {
             let name = dev["name"].as_str().unwrap_or("").to_string();
-            // Skip loop devices (the live squashfs sits on one) and sr*/cdrom.
-            if name.starts_with("loop") || name.starts_with("sr") {
+            // Skip loop devices (the live squashfs sits on one), fd/floppy,
+            // and sr*/cdrom.
+            if name.starts_with("loop") || name.starts_with("sr") || name.starts_with("fd") {
                 continue;
             }
             let size_bytes = dev["size"]
                 .as_str()
-                .and_then(|s| s.parse::<u64>().ok())
+                .map(parse_size)
+                .or_else(|| dev["size"].as_u64())
                 .unwrap_or(0);
             if size_bytes < min_bytes {
                 continue;

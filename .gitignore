@@ -21,3 +21,5 @@ __pycache__/
 
 # macOS
 .DS_Store
+# pytest cache
+.pytest_cache/
