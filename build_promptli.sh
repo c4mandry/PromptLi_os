@@ -68,6 +68,51 @@ lb config noauto \
     --memtest none \
     --binary-images iso-hybrid
 
+# ── Bootloader: no menu, promptLi branding ───────────────
+# Override the live-build templates so the ISO boots straight into
+# promptLi OS with zero delay — no "Debian GNU/Linux … Live system /
+# fail-safe / Utilities" menu on either BIOS (isolinux) or UEFI (GRUB).
+echo "[*] Customizing bootloader (no menu, promptLi branding)..."
+mkdir -p config/bootloaders/isolinux config/bootloaders/syslinux_common config/bootloaders/grub-pc
+
+cat > config/bootloaders/isolinux/isolinux.cfg << 'X'
+default live
+prompt 0
+timeout 0
+
+include live.cfg
+X
+
+cat > config/bootloaders/syslinux_common/live.cfg.in << 'X'
+label live
+	menu label ^promptLi OS 1.0.0
+	menu default
+	linux @LINUX@
+	initrd @INITRD@
+	append @APPEND_LIVE@
+
+label live-failsafe
+	menu label promptLi OS 1.0.0 (fail-safe mode)
+	linux @LINUX@
+	initrd @INITRD@
+	append @APPEND_LIVE_FAILSAFE@
+X
+
+cat > config/bootloaders/grub-pc/grub.cfg << 'X'
+set default=0
+set timeout=0
+
+menuentry "promptLi OS 1.0.0" {
+	linux	@KERNEL_LIVE@ @APPEND_LIVE@
+	initrd	@INITRD_LIVE@
+}
+X
+
+cat > config/bootloaders/grub-pc/config.cfg << 'X'
+set default=0
+set timeout=0
+X
+
 # ── Package list ─────────────────────────────────────────
 echo "[*] Setting package list..."
 cat > config/package-lists/promptli.list.chroot << 'PACKAGES'
@@ -720,7 +765,7 @@ cat > "$INCLUDES/etc/fastfetch/config.jsonc" << 'X'
     "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
     "logo": {
         "type": "data",
-        "source": "$1        ▄▄▄\n$1       █████\n$2      ███████\n$2     █████████\n$3    ███████████\n$4   █████████████\n$5  ███████████████\n$5  ▀██████████████\n$4   ▀████████████\n$3    ▀██████████\n$2     ▀████████\n$2      ▀██████\n$1       ▀████\n$1        ▀██",
+        "source": "$1⠀⠀⠀⠀⠀⢀⣠⣤⣶⣶⣿⣿⣿⣶⣶⣤⡀⠀⠀⠀⠀\n$1⠀⠀⠀⠀⣴⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣦⡀⠀⠀\n$1⠀⠀⠀⣼⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣧⠀⠀\n$2⠀⠀⢠⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡄⠀\n$2⠀⠀⢸⣿⣿⣿⣿⣿⡏⢸⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇⠀\n$2⠀⠀⠘⣿⣿⣟⡿⢿⣷⢸⠞⠛⢽⣾⣛⡟⣿⣿⣿⠁⠀\n$3⠀⠀⠀⠻⣿⡟⢶⡿⡿⠀⠀⠀⠀⠹⠯⠏⢸⣿⣿⠀⠀\n$3⠀⠀⠀⠀⠛⣾⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣼⣿⡏⠀⠀\n$3⠀⠀⠀⠀⠀⣿⣿⣄⠀⠀⠈⠍⠀⠀⢀⣼⣿⣿⡇⠀⠀\n$4⠀⠀⠀⠀⠀⠈⠀⠘⢉⠖⠠⠤⠤⠀⠈⡌⣿⡏⠀⠀⠀\n$4⠀⠀⠀⠀⠀⢀⡠⠔⠊⠀⠀⠀⠀⠀⠀⠈⣿⡀⠀⠀⠀\n$5⠀⡠⠂⠉⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣿⠈⠁⠂⢄\n$5⢰⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠘⣆⠀⠀⠈",
         "color": {
             "1": "bright_magenta",
             "2": "bright_blue",
@@ -935,6 +980,12 @@ done
 # Raise systemd's default timeout (older/slow disks) and keep quiet boot.
 mkdir -p /etc/systemd/system.conf.d
 printf '[Manager]\nDefaultTimeoutStartSec=45s\nDefaultTimeoutStopSec=20s\n' > /etc/systemd/system.conf.d/promptli.conf
+
+# ── NO autologin ──────────────────────────────────────────
+# live-config ships a systemd generator that auto-logs the live user in on
+# tty1-6. promptLi OS is a server distro — always ask for credentials.
+echo "  [*] Removing live-config tty autologin generator..."
+rm -f /lib/systemd/system-generators/live-config-getty-generator
 
 # ── Default user: created at build time (not first boot) ──
 echo "  [*] Creating default user 'promptli'..."
