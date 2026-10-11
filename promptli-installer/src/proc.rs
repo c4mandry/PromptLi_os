@@ -50,6 +50,7 @@ pub fn run_capture_combined(cmd: &str, args: &[&str]) -> String {
 }
 
 /// Check whether a command exists on PATH.
+#[allow(dead_code)]
 pub fn has(cmd: &str) -> bool {
     Command::new("sh")
         .args(["-c", &format!("command -v {} >/dev/null 2>&1", cmd)])

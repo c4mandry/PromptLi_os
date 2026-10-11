@@ -13,18 +13,15 @@ pub const LIVE_SQUASHFS_PATHS: &[&str] = &[
     // Fallback: the installer may have been given the path directly.
 ];
 
-/// Default website base URL used for enrollment + updates.
+/// Default website base URL used for enrollment.
 pub const DEFAULT_SITE_URL: &str = "https://webnotes.work";
-
-/// Where installed machines store their enrollment + site config.
-pub const INSTALL_STATE_PATH: &str = "/etc/promptli/install.json";
 
 /// Machine state written onto the installed system after a successful install.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InstallState {
     /// promptLi OS version that was installed.
     pub version: String,
-    /// Base URL of the website (update + enrollment callback host).
+    /// Base URL of the website (enrollment callback host).
     pub site_url: String,
     /// Enrollment token issued by the server on registration.
     pub token: String,
@@ -32,25 +29,6 @@ pub struct InstallState {
     pub machine_id: String,
     /// Install timestamp (RFC3339).
     pub installed_at: String,
-}
-
-/// The release manifest published by the website at /api/os/latest.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReleaseManifest {
-    pub name: Option<String>,
-    pub version: Option<String>,
-    pub codename: Option<String>,
-    pub base: Option<String>,
-    pub arch: Option<String>,
-    #[serde(rename = "iso_filename")]
-    pub iso_filename: Option<String>,
-    #[serde(rename = "iso_url")]
-    pub iso_url: Option<String>,
-    pub sha256: Option<String>,
-    #[serde(rename = "size_bytes")]
-    pub size_bytes: Option<u64>,
-    #[serde(rename = "released_at")]
-    pub released_at: Option<String>,
 }
 
 /// A disk as discovered via lsblk.

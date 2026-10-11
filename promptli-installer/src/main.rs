@@ -29,32 +29,14 @@ fn main() {
 }
 
 fn run_update(args: &[String]) -> i32 {
-    let apply = args.iter().any(|a| a == "--apply");
+    // promptLi OS updates via the package managers; this is a friendly alias.
+    let _apply = args.iter().any(|a| a == "--apply");
     let check = args.iter().any(|a| a == "--check");
 
-    let dest = args
-        .iter()
-        .find(|a| a.starts_with("--dest="))
-        .map(|a| a.trim_start_matches("--dest=").to_string())
-        .unwrap_or_else(|| "/root/promptli-os-update.iso".to_string());
-
-    let state = http_client::load_state();
-
-    let res = if apply {
-        update::run_apply(state, &dest)
-    } else if !apply && !check {
-        state
-            .as_ref()
-            .map(|s| -> std::io::Result<i32> {
-                println!("promptLi OS {} (update targets {})", s.version, s.site_url);
-                Ok(0)
-            })
-            .unwrap_or_else(|| -> std::io::Result<i32> {
-                eprintln!("not installed");
-                Ok(1)
-            })
+    let res = if check {
+        update::run_check(None)
     } else {
-        update::run_check(state)
+        update::run_apply(None, "")
     };
 
     match res {
@@ -209,7 +191,7 @@ fn print_usage() {
 USAGE:\n\
   promptli-install                     Interactive TUI installer\n\
   promptli-install --disk sda [opts]   Unattended install\n\
-  promptli-update (--check|--apply)    Check/apply OS updates from the website\n\n\
+  promptli-update (--check|--apply)    apt update/upgrade (same as pacman -Syu)\n\n\
 OPTIONS:\n\
   --disk <dev>        Target disk (e.g. sda)\n\
   --hostname <name>   Hostname (default: promptli)\n\

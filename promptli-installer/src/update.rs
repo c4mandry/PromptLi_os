@@ -1,65 +1,48 @@
-//! The `promptli-update` subcommand: check for / apply OS updates from the website.
+//! The `promptli-update` command: a thin friendly wrapper over the real
+//! package managers. promptLi OS updates through `apt` (and `pacman`, which
+//! the wrapper maps to apt) — there is no separate ISO-download mechanism.
+//!
+//!   promptli-update --check   → apt-get update; report what's upgradable
+//!   promptli-update --apply   → apt-get upgrade -y (the actual OS update)
 
-use crate::common::InstallState;
-use crate::http_client;
+use crate::proc;
 
-pub fn run_check(state: Option<InstallState>) -> std::io::Result<i32> {
-    let Some(state) = state else {
-        eprintln!("promptli-update: not installed (missing {})", crate::common::INSTALL_STATE_PATH);
-        return Ok(1);
-    };
-
-    match http_client::check_update(&state.site_url, Some(&state.token), &state.version) {
-        Ok(Some(m)) => {
-            println!(
-                "A new promptLi OS release is available: {} -> {}{}",
-                state.version,
-                m.version.as_deref().unwrap_or("unknown"),
-                m.released_at
-                    .as_deref()
-                    .map(|d| format!(" (released {d})"))
-                    .unwrap_or_default()
-            );
-            if let Some(url) = &m.iso_url {
-                println!("Download: {}{}", state.site_url, url);
-            }
-            Ok(0)
-        }
-        Ok(None) => {
-            println!("promptLi OS is up to date (v{}).", state.version);
-            Ok(0)
-        }
-        Err(e) => {
-            eprintln!("promptli-update: check failed: {e}");
-            Ok(1)
-        }
-    }
+fn run_apt(args: &[&str]) -> std::io::Result<i32> {
+    let code = proc::run_streaming("apt-get", args)?;
+    Ok(code)
 }
 
-pub fn run_apply(state: Option<InstallState>, dest: &str) -> std::io::Result<i32> {
-    let Some(state) = state else {
-        eprintln!("promptli-update: not installed (missing {})", crate::common::INSTALL_STATE_PATH);
-        return Ok(1);
-    };
+pub fn run_check(_state: Option<crate::common::InstallState>) -> std::io::Result<i32> {
+    println!("Checking for package updates (apt-get update) ...");
+    let code = run_apt(&["update"])?;
+    if code != 0 {
+        return Ok(code);
+    }
 
-    let manifest = match http_client::fetch_latest(&state.site_url, Some(&state.token)) {
-        Ok(m) => m,
-        Err(e) => {
-            eprintln!("promptli-update: fetch failed: {e}");
-            return Ok(1);
+    // Count upgradable packages without committing anything.
+    let out = proc::run_capture_combined(
+        "sh",
+        &[
+            "-c",
+            "apt-get -s upgrade 2>/dev/null | grep -c '^Inst ' || true",
+        ],
+    );
+    let count = out.trim();
+    if let Ok(n) = count.parse::<u32>() {
+        if n > 0 {
+            println!("{n} package(s) can be upgraded. Run `sudo apt upgrade` or `sudo pacman -Syu`.");
+        } else {
+            println!("promptLi OS is up to date.");
         }
-    };
-
-    let url = match manifest.iso_url.as_deref() {
-        Some(u) if !u.is_empty() => u,
-        _ => {
-            eprintln!("promptli-update: no download URL in manifest");
-            return Ok(1);
-        }
-    };
-
-    println!("Downloading promptLi OS {} ...", manifest.version.as_deref().unwrap_or("?"));
-    http_client::download_iso(&state.site_url, url, dest)?;
-    println!("Saved to {dest}. Reflash to install or run `promptli-install --from {dest}`.");
+    }
     Ok(0)
+}
+
+pub fn run_apply(_state: Option<crate::common::InstallState>, _dest: &str) -> std::io::Result<i32> {
+    println!("Updating promptLi OS (apt-get upgrade) ...");
+    let code = run_apt(&["upgrade", "-y"])?;
+    if code == 0 {
+        println!("✅ promptLi OS updated. Reboot if the kernel was upgraded.");
+    }
+    Ok(code)
 }

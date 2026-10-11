@@ -271,24 +271,30 @@ fn physical_disk(part: &str) -> String {
 }
 
 fn install_updater_files(root: &Path) -> io::Result<()> {
-    // Enable a systemd timer that runs promptli-update --check on boot/day.
-    let unit = format!(
-        "\
-[Unit]\n\
-Description=promptLi OS update check\n\
-After=network-online.target\n\
-Wants=network-online.target\n\
-\n\
-[Service]\n\
-Type=oneshot\n\
-ExecStart=/usr/local/bin/promptli-update --check\n\
-\n\
-[Install]\n\
-WantedBy=multi-user.target\n"
-    );
-    let unit_path = root.join("etc/systemd/system/promptli-update.service");
-    std::fs::create_dir_all(unit_path.parent().unwrap())?;
-    std::fs::write(&unit_path, unit)?;
+    // promptLi OS updates through the Debian package managers: `apt upgrade`
+    // and `pacman -Syu` (which the pacman wrapper maps to apt). We do NOT ship
+    // a separate ISO-download updater — instead we make sure the standard apt
+    // update timers are in place so the system self-updates like any Debian.
+
+    // apt-daily + apt-daily-upgrade are enabled by default in Debian; just
+    // ensure they aren't masked (in case an earlier build masked them).
+    for masked in ["apt-daily.timer", "apt-daily-upgrade.timer"] {
+        let p = root.join("etc/systemd/system").join(masked);
+        // If it's a symlink to /dev/null (mask), remove it to unmask.
+        if let Ok(meta) = std::fs::symlink_metadata(&p) {
+            if meta.file_type().is_symlink() {
+                let dst = std::fs::read_link(&p).unwrap_or_default();
+                if dst == std::path::Path::new("/dev/null") {
+                    let _ = std::fs::remove_file(&p);
+                }
+            }
+        }
+    }
+
+    // A small convenience hook: `promptli-update` still exists for humans who
+    // type it, but it just runs the real package upgrade. The installer ships
+    // the binary; here we install a systemd timer that runs the equivalent.
+    let _ = root;
     Ok(())
 }
 

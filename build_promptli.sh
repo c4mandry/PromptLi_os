@@ -15,7 +15,7 @@ echo "  1. Install build dependencies (live-build etc.)"
 echo "  2. Build a custom, minimal Debian live ISO (server-focused, no WM/DE):"
 echo "     - promptLi AI Assistant (Claude API + system control)"
 echo "     - locakHost web server (terminal: just type 'locakhost')"
-echo "     - Rust TUI installer (promptli-install) + updater (promptli-update)"
+echo "     - Rust TUI installer (promptli-install); updates via apt/pacman -Syu"
 echo "  3. Output: promptli-os-1.0.0-amd64.iso"
 echo ""
 
@@ -848,9 +848,9 @@ cat > "$INCLUDES/etc/motd" << 'X'
 
   Assistant:  aido             AI:           aido chat
   Packages:   pacman -S pkg    AUR:          pacman -S <aur-pkg>
-  Installer:  promptli-install       Update:  promptli-update --check
-  Terminal:   promptli-term    Shell:        zsh
-  Web server: locakhost        Docs:         https://webnotes.work/os
+  Update:     sudo apt upgrade OR sudo pacman -Syu
+  Installer:  promptli-install     Shell:    zsh
+  Terminal:   promptli-term    Docs:         https://webnotes.work/os
 
 X
 cat > "$INCLUDES/etc/issue" << 'X'
@@ -1174,10 +1174,11 @@ if command -v mist >/dev/null 2>&1; then echo "  [✓] mist installed (AUR ready
 echo "  [*] Applying boot-speed + RAM tweaks..."
 # systemctl needs dbus, which doesn't exist inside a build chroot — masking
 # is just a symlink to /dev/null, so do that directly.
+# NOTE: apt-daily.timer / apt-daily-upgrade.timer are KEPT enabled — promptLi
+# OS updates through apt, so background update checks are desired.
 for unit in systemd-networkd-wait-online.service \
             NetworkManager-wait-online.service \
             ModemManager.service \
-            apt-daily.timer apt-daily-upgrade.timer \
             man-db.timer fstrim.timer \
             cron.service \
             wpa_supplicant.service \
@@ -1295,7 +1296,7 @@ if [ -f "$ISO_PATH" ]; then
     "zsh with autosuggestions, syntax highlighting, and a git-aware prompt",
     "systemd-networkd + resolved networking (no NetworkManager bloat)",
     "Custom fastfetch identity with the promptLi OS logo",
-    "Rust TUI installer (promptli-install) + self-updater (promptli-update)",
+    "Rust TUI installer (promptli-install); updates via apt/pacman -Syu",
     "Fast, quiet boot with low idle RAM (capped journald, 2 gettys)",
     "locakHost local web server"
   ],
