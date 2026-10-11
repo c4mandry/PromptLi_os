@@ -48,6 +48,15 @@ sudo apt-get install -y --no-install-recommends \
     gzip xz-utils wget curl git ca-certificates
 
 # ── Clean build dir ──────────────────────────────────────
+# If a previous build was interrupted, the chroot may still have /proc,
+# /sys, /dev/pts mounted inside it; rm -rf would fail on those (and set -e
+# would abort the whole build), so lazy-unmount them first.
+for m in "$BUILD_DIR/chroot/dev/pts" "$BUILD_DIR/chroot/proc" "$BUILD_DIR/chroot/sys" "$BUILD_DIR/chroot/dev"; do
+    if mountpoint -q "$m" 2>/dev/null; then
+        echo "[!] Unmounting leftover mount from an interrupted build: $m"
+        sudo umount -l "$m" 2>/dev/null || true
+    fi
+done
 rm -rf "$BUILD_DIR" "$OUTPUT_DIR"
 mkdir -p "$BUILD_DIR" "$OUTPUT_DIR"
 cd "$BUILD_DIR"
@@ -697,18 +706,22 @@ set -e
 
 NEED_ROOT=1
 case "$1" in
-    -Q*|-Ss*|-Si*|-h|--help|help|"") NEED_ROOT=0 ;;
+    -Q*|-Ss*|-Si*|-V|--version|-h|--help|help|"") NEED_ROOT=0 ;;
 esac
 [ "$(id -u)" = 0 ] || { [ $NEED_ROOT = 0 ] || exec sudo -E "$0" "$@"; }
 
 case "$1" in
+    -V|--version)
+        echo "pacman (promptLi OS wrapper) 1.0.0"
+        echo "Debian/apt frontend with AUR support via makedeb"
+        ;;
     -S)
         shift
         for pkg in "$@"; do
             if apt-cache show "$pkg" >/dev/null 2>&1; then
                 apt-get install -y "$pkg"
             else
-                echo "→ '$pkg' is not in the Debian repos — building from AUR..."
+                echo "-> '$pkg' is not in the Debian repos - building from AUR..."
                 tmp="/tmp/aur-$pkg"
                 rm -rf "$tmp"
                 git clone --depth 1 "https://aur.archlinux.org/$pkg.git" "$tmp"
@@ -759,6 +772,7 @@ promptLi OS is Debian-based, so packages install through apt. AUR packages
 are built from PKGBUILDs with makedeb and installed the same way.
 
   pacman -S <pkg>     install (Debian repo first, then AUR build)
+  pacman -V           show version
   pacman -Sy          apt update
   pacman -Su          apt upgrade
   pacman -Syu         apt update + upgrade
@@ -773,7 +787,7 @@ For direct apt use: apt install <pkg>.
 HELP
         ;;
     *)
-        echo "unknown operation '$1' — run: pacman --help" >&2
+        echo "unknown operation '$1' - run: pacman --help" >&2
         exit 1
         ;;
 esac
@@ -844,7 +858,7 @@ ln -sf /etc/os-release "$INCLUDES/usr/lib/os-release"
 mkdir -p "$INCLUDES/etc"
 cat > "$INCLUDES/etc/motd" << 'X'
 
-  ⚡ promptLi OS 1.0.0 (L1-433) — minimal server-focused Debian
+  promptLi OS 1.0.0 (L1-433) - minimal server-focused Debian
 
   Assistant:  aido             AI:           aido chat
   Packages:   pacman -S pkg    AUR:          pacman -S <aur-pkg>
@@ -862,17 +876,20 @@ X
 mkdir -p "$INCLUDES/etc/fastfetch" "$INCLUDES/etc/skel/.config/fastfetch"
 cat > "$INCLUDES/etc/fastfetch/config.jsonc" << 'X'
 // promptLi OS fastfetch config — custom logo + clean output.
-// Monochrome: the logo source is plain text with no color placeholders, so
-// it renders in the terminal's default foreground color.
+// Monochrome logo: fastfetch 2.40 defaults a `data` logo to the fallback
+// (unknown) OS logo's colors, so we pin color 1 to the terminal default and
+// disable bold (brightColor) — the art renders in plain foreground color.
 {
     "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
     "logo": {
         "type": "data",
         "source": "⠀⠀⠀⠀⠀⢀⣠⣤⣶⣶⣿⣿⣿⣶⣶⣤⡀⠀⠀⠀⠀\n⠀⠀⠀⠀⣴⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣦⡀⠀⠀\n⠀⠀⠀⣼⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣧⠀⠀\n⠀⠀⢠⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡄⠀\n⠀⠀⢸⣿⣿⣿⣿⣿⡏⢸⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇⠀\n⠀⠀⠘⣿⣿⣟⡿⢿⣷⢸⠞⠛⢽⣾⣛⡟⣿⣿⣿⠁⠀\n⠀⠀⠀⠻⣿⡟⢶⡿⡿⠀⠀⠀⠀⠹⠯⠏⢸⣿⣿⠀⠀\n⠀⠀⠀⠀⠛⣾⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣼⣿⡏⠀⠀\n⠀⠀⠀⠀⠀⣿⣿⣄⠀⠀⠈⠍⠀⠀⢀⣼⣿⣿⡇⠀⠀\n⠀⠀⠀⠀⠀⠈⠀⠘⢉⠖⠠⠤⠤⠀⠈⡌⣿⡏⠀⠀⠀\n⠀⠀⠀⠀⠀⢀⡠⠔⠊⠀⠀⠀⠀⠀⠀⠈⣿⡀⠀⠀⠀\n⠀⡠⠂⠉⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣿⠈⠁⠂⢄\n⢰⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠘⣆⠀⠀⠈",
-        "padding": { "left": 2 }
+        "padding": { "left": 2 },
+        "color": { "1": "default" }
     },
     "display": {
-        "separator": " ➜ "
+        "separator": " ➜ ",
+        "brightColor": false
     },
     "modules": [
         "title",
@@ -917,13 +934,21 @@ autoload -Uz edit-command-line
 zle -N edit-command-line
 bindkey '^X^E' edit-command-line
 
-# ── Prompt (bold, git-aware, safe for 8/16-color ttys) ───
+# ── Prompt ───────────────────────────────────────────────
+# Two variants:
+#  - plain Linux console (TERM=linux): pure ASCII so nothing renders as a
+#    box in the kernel console font, and cell spacing is perfect.
+#  - real terminal emulators: a bit fancier (git branch, ⚡/❯ glyphs).
 autoload -Uz vcs_info
 precmd() { vcs_info }
 zstyle ':vcs_info:git:*' formats '(%b)'
 zstyle ':vcs_info:*' enable git
 setopt PROMPT_SUBST
-PROMPT='%B%F{magenta}⚡%f%b %B%F{cyan}%~%f%b %F{yellow}${vcs_info_msg_0_}%f%(!.%F{red}%n@%m.%F{green}❯)%f '
+if [[ "$TERM" == "linux" ]]; then
+    PROMPT='%B%F{green}%n@%m%f%b:%F{cyan}%~%f%F{yellow}${vcs_info_msg_0_}%f%(!.%F{red}#%f.%F{green}$%f) '
+else
+    PROMPT='%B%F{magenta}⚡%f%b %B%F{cyan}%~%f%b %F{yellow}${vcs_info_msg_0_}%f%(!.%F{red}%n@%m.%F{green}❯)%f '
+fi
 
 # ── Aliases (modern tools) ───────────────────────────────
 alias ls='eza --icons=never --color=auto --group-directories-first'
@@ -946,15 +971,11 @@ source /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh 2>/dev/null
 source /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh 2>/dev/null
 ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=8'
 
-# ── Modern framebuffer console (fbterm) ──────────────────
-# On real VTs (not serial), upgrade the Linux console to fbterm: Unicode
-# fonts via fontconfig (the promptLi braille logo renders properly), 256
-# colors, and a wallpaper background.
-if [[ -o login && -o interactive && "$TERM" == "linux" && "${TTY:-}" == /dev/tty[0-9]* && "$FBTERM_BACKGROUND_IMAGE" == "" ]]; then
-    if command -v fbterm >/dev/null 2>&1; then
-        exec /usr/local/bin/promptli-term
-    fi
-fi
+# ── Normal console look ──────────────────────────────────
+# promptLi OS logs you into the plain Linux console (perfect character
+# spacing, the look every Linux user knows). fbterm is still available as
+# an OPT-IN fancy terminal — run `promptli-term` if you want Unicode fonts
+# and a wallpaper background.
 
 # ── promptLi autostart (sourced once per login shell) ────
 # Drop executable scripts in /etc/promptli/autostart.d/ (system-wide) or
@@ -977,11 +998,14 @@ X
 cp "$INCLUDES/etc/zsh/zshrc" "$INCLUDES/etc/skel/.zshrc"
 
 # ── fbterm config + launcher + framebuffer wallpaper ─────
+# fbterm is OPT-IN (`promptli-term`): the default login uses the plain
+# Linux console. DejaVu Sans Mono at 14px has uniform advance widths, which
+# avoids the uneven letter spacing that other fonts produce in fbterm.
 mkdir -p "$INCLUDES/usr/share/promptli"
 cat > "$INCLUDES/etc/skel/.fbtermrc" << 'X'
-# promptLi OS fbterm config — Unicode fonts (braille logo renders correctly).
-font-names=Noto Sans Mono,DejaVu Sans Mono
-font-size=13
+# promptLi OS fbterm config (used only when running promptli-term).
+font-names=DejaVu Sans Mono
+font-size=14
 text-encodings=UTF-8
 X
 cat > "$INCLUDES/usr/local/bin/promptli-term" << 'X'; chmod +x "$INCLUDES/usr/local/bin/promptli-term"
@@ -1056,7 +1080,7 @@ X
 # ── Autostart config system ──────────────────────────────
 mkdir -p "$INCLUDES/etc/promptli/autostart.d" "$INCLUDES/etc/skel/.config/promptli/autostart.d"
 cat > "$INCLUDES/etc/promptli/autostart.d/10-welcome.sh" << 'X'
-# promptLi autostart example — runs in zsh login shells.
+# promptLi autostart — runs in zsh login shells.
 # Add your own scripts here (system) or ~/.config/promptli/autostart.d/ (user).
 if [[ -o interactive && -o login ]]; then
     command -v fastfetch >/dev/null 2>&1 && fastfetch
@@ -1096,9 +1120,9 @@ if ! command -v mist >/dev/null 2>&1; then
     fi
 fi
 if command -v mist >/dev/null 2>&1; then
-    echo "  [✓] AUR ready: mist install <package>"
+    echo "  [ok] AUR ready: mist install <package>"
 else
-    echo "  [✓] AUR available via: pacman -S <aur-package> (makedeb)"
+    echo "  [ok] AUR available via: pacman -S <aur-package> (makedeb)"
 fi
 systemctl disable promptli-setup.service 2>/dev/null || true
 X
@@ -1202,12 +1226,18 @@ printf '[Login]\nNAutoVTs=2\n' > /etc/systemd/logind.conf.d/promptli.conf
 echo "  [*] Enabling systemd-networkd + resolved..."
 # live-config is gone, so purge it (and the dbus daemon family it dragged
 # in) and replace the system bus with the lighter/faster dbus-broker.
+# IMPORTANT: dbus-broker must be installed BEFORE purging dbus — it
+# Provides: dbus-system-bus, which satisfies systemd-resolved's dependency;
+# otherwise the purge takes systemd-resolved + libnss-resolve with it and
+# DNS is dead on boot.
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq dbus-broker 2>/dev/null || true
 DEBIAN_FRONTEND=noninteractive apt-get purge -y -qq \
     live-config live-config-systemd live-config-doc \
     dbus dbus-bin dbus-daemon dbus-session-bus-common dbus-system-bus-common \
     2>/dev/null || true
 apt-get autoremove -y -qq 2>/dev/null || true
-DEBIAN_FRONTEND=noninteractive apt-get install -y -qq dbus-broker 2>/dev/null || true
+# Belt and braces: make sure resolved + its nss module survived the purge.
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq systemd-resolved 2>/dev/null || true
 ln -sf /lib/systemd/system/systemd-networkd.service /etc/systemd/system/multi-user.target.wants/systemd-networkd.service
 ln -sf /lib/systemd/system/systemd-networkd.socket /etc/systemd/system/sockets.target.wants/systemd-networkd.socket
 ln -sf /lib/systemd/system/systemd-resolved.service /etc/systemd/system/multi-user.target.wants/systemd-resolved.service
@@ -1224,6 +1254,29 @@ DHCP=yes
 RouteMetric=10
 NET
 ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+
+# ── Ensure resolv.conf at boot ─────────────────────────────
+# live-build empties /etc/resolv.conf after the chroot hooks, so the
+# symlink above does not survive into the image. Recreate it at boot
+# (before resolved/networkd come up) so tools that read resolv.conf
+# directly see the stub. libnss-resolve already handles most lookups.
+mkdir -p /etc/systemd/system/sysinit.target.wants
+cat > /etc/systemd/system/promptli-resolvconf.service << 'SVC'
+[Unit]
+Description=Link /etc/resolv.conf to systemd-resolved stub
+DefaultDependencies=no
+After=systemd-tmpfiles-setup.service
+Before=systemd-resolved.service network.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'rm -f /etc/resolv.conf && ln -s /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf'
+RemainAfterExit=yes
+
+[Install]
+WantedBy=sysinit.target
+SVC
+ln -sf /etc/systemd/system/promptli-resolvconf.service /etc/systemd/system/sysinit.target.wants/promptli-resolvconf.service
 
 # ── NO autologin ──────────────────────────────────────────
 # live-config ships a systemd generator that auto-logs the live user in on
@@ -1292,7 +1345,7 @@ if [ -f "$ISO_PATH" ]; then
     "Minimal, bloat-free base — no window manager, no desktop environment",
     "aido — private, offline local AI assistant (terminal-first)",
     "pacman works: Debian packages via apt, AUR packages built with makedeb",
-    "fbterm console: Unicode fonts (logo renders), wallpaper, 256 colors",
+    "Plain Linux console by default; fbterm opt-in via promptli-term",
     "zsh with autosuggestions, syntax highlighting, and a git-aware prompt",
     "systemd-networkd + resolved networking (no NetworkManager bloat)",
     "Custom fastfetch identity with the promptLi OS logo",
