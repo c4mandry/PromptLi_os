@@ -59,7 +59,7 @@ lb config noauto \
     --architecture amd64 \
     --distribution trixie \
     --archive-areas "main contrib non-free non-free-firmware" \
-    --bootappend-live "boot=live components quiet" \
+    --bootappend-live "boot=live quiet" \
     --debian-installer none \
     --iso-application "promptLi OS" \
     --iso-publisher "promptLi" \
@@ -119,9 +119,10 @@ cat > config/package-lists/promptli.list.chroot << 'PACKAGES'
 # promptLi OS — minimal, server-focused base.
 # No window manager, no desktop environment, no Xorg — boots to a console TTY.
 
-# Base system & boot
-linux-image-amd64 live-boot live-config live-tools
-systemd-sysv sudo adduser
+# Base system & boot (no live-config: we configure users/hostname ourselves,
+# and dropping it removes the dbus daemon — less RAM, less attack surface)
+linux-image-amd64 live-boot live-tools
+systemd-sysv systemd-resolved systemd-timesyncd sudo adduser
 
 # Shell: zsh with autosuggestions + syntax highlighting
 zsh zsh-autosuggestions zsh-syntax-highlighting zsh-common
@@ -133,8 +134,12 @@ fastfetch fzf eza bat ripgrep fd-find zoxide btop tmux
 curl wget git vim htop unzip p7zip-full less
 rsync ca-certificates
 
-# Networking
-network-manager wireless-tools wpasupplicant iproute2 iw
+# Networking: systemd-networkd + resolved (lean; no NetworkManager/dbus bloat)
+# wpa_supplicant + iw stay for WiFi
+wpasupplicant iw iproute2
+
+# Modern framebuffer console: fbterm (Unicode fonts, images) + Noto mono
+fbterm fonts-noto-mono
 
 # Disk / provisioning (used by the Rust installer; sfdisk ships in util-linux)
 parted fdisk util-linux dosfstools
@@ -678,6 +683,102 @@ cat > "$INCLUDES/usr/local/bin/locakhost" << 'X'; chmod +x "$INCLUDES/usr/local/
 exec python3 /opt/promptli/tools/locakhost.py "$@"
 X
 
+# pacman: translation wrapper — Debian packages via apt, AUR packages built
+# with makedeb. /usr/local/bin wins over /usr/bin/pacman on PATH.
+cat > "$INCLUDES/usr/local/bin/pacman" << 'X'; chmod +x "$INCLUDES/usr/local/bin/pacman"
+#!/bin/sh
+# pacman wrapper for promptLi OS (Debian-based).
+#   -S pkg   install: Debian package if it exists, otherwise build from AUR
+#   -Syu     apt update + upgrade
+#   -Ss q    search Debian repos
+#   -Q       list installed packages
+#   -R pkg   remove a package
+set -e
+
+NEED_ROOT=1
+case "$1" in
+    -Q*|-Ss*|-Si*|-h|--help|help|"") NEED_ROOT=0 ;;
+esac
+[ "$(id -u)" = 0 ] || { [ $NEED_ROOT = 0 ] || exec sudo -E "$0" "$@"; }
+
+case "$1" in
+    -S)
+        shift
+        for pkg in "$@"; do
+            if apt-cache show "$pkg" >/dev/null 2>&1; then
+                apt-get install -y "$pkg"
+            else
+                echo "→ '$pkg' is not in the Debian repos — building from AUR..."
+                tmp="/tmp/aur-$pkg"
+                rm -rf "$tmp"
+                git clone --depth 1 "https://aur.archlinux.org/$pkg.git" "$tmp"
+                # makepkg/makedeb refuse to run as root — drop back to the
+                # invoking user for the build (makedeb -s sudo's for deps).
+                if [ "$(id -u)" = 0 ] && [ -n "${SUDO_USER:-}" ]; then
+                    chown -R "$SUDO_USER" "$tmp"
+                    runuser -u "$SUDO_USER" -- sh -c "cd '$tmp' && makedeb -si --no-confirm"
+                else
+                    (cd "$tmp" && makedeb -si --no-confirm)
+                fi
+            fi
+        done
+        ;;
+    -Sy)
+        apt-get update
+        ;;
+    -Su)
+        apt-get upgrade
+        ;;
+    -Syu|-Suy)
+        apt-get update && apt-get upgrade
+        ;;
+    -Ss)
+        apt-cache search "$2"
+        ;;
+    -Si)
+        apt-cache show "$2"
+        ;;
+    -Q)
+        dpkg -l | grep '^ii'
+        ;;
+    -Qs)
+        dpkg -l | grep "$2"
+        ;;
+    -R|-Rns|-Rs)
+        shift
+        apt-get remove "$@"
+        ;;
+    -Sc)
+        apt-get clean
+        ;;
+    -h|--help|help|"")
+        cat << 'HELP'
+pacman (promptLi OS wrapper)
+
+promptLi OS is Debian-based, so packages install through apt. AUR packages
+are built from PKGBUILDs with makedeb and installed the same way.
+
+  pacman -S <pkg>     install (Debian repo first, then AUR build)
+  pacman -Sy          apt update
+  pacman -Su          apt upgrade
+  pacman -Syu         apt update + upgrade
+  pacman -Ss <query>  search
+  pacman -Si <pkg>    show package details
+  pacman -Q           list installed packages
+  pacman -Qs <query>  search installed packages
+  pacman -R <pkg>     remove
+  pacman -Sc          clear the apt cache
+
+For direct apt use: apt install <pkg>.
+HELP
+        ;;
+    *)
+        echo "unknown operation '$1' — run: pacman --help" >&2
+        exit 1
+        ;;
+esac
+X
+
 # ── Rust installer + updater ────────────────────────────────
 # The installer is built from promptli-installer/ (Cargo) and installed as:
 #   /usr/local/bin/promptli-install   (TUI installer)
@@ -745,10 +846,11 @@ cat > "$INCLUDES/etc/motd" << 'X'
 
   ⚡ promptLi OS 1.0.0 (L1-433) — minimal server-focused Debian
 
-  Assistant:  aido            AI:           aido chat
-  AUR:        mist install X  Shell:        zsh
-  Installer:  promptli-install      Update:  promptli-update --check
-  Web server: locakhost       Docs:        https://webnotes.work/os
+  Assistant:  aido             AI:           aido chat
+  Packages:   pacman -S pkg    AUR:          pacman -S <aur-pkg>
+  Installer:  promptli-install       Update:  promptli-update --check
+  Terminal:   promptli-term    Shell:        zsh
+  Web server: locakhost        Docs:         https://webnotes.work/os
 
 X
 cat > "$INCLUDES/etc/issue" << 'X'
@@ -833,7 +935,6 @@ alias tree='eza --tree --icons=never'
 alias mkdir='mkdir -pv'
 alias df='df -h'
 alias free='free -h'
-alias pacman='pacman --color auto'
 
 # ── Keybindings ──────────────────────────────────────────
 bindkey '^[[A' up-line-or-search
@@ -844,6 +945,16 @@ bindkey '^R' history-incremental-search-backward
 source /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh 2>/dev/null
 source /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh 2>/dev/null
 ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=8'
+
+# ── Modern framebuffer console (fbterm) ──────────────────
+# On real VTs (not serial), upgrade the Linux console to fbterm: Unicode
+# fonts via fontconfig (the promptLi braille logo renders properly), 256
+# colors, and a wallpaper background.
+if [[ -o login && -o interactive && "$TERM" == "linux" && "${TTY:-}" == /dev/tty[0-9]* && "$FBTERM_BACKGROUND_IMAGE" == "" ]]; then
+    if command -v fbterm >/dev/null 2>&1; then
+        exec /usr/local/bin/promptli-term
+    fi
+fi
 
 # ── promptLi autostart (sourced once per login shell) ────
 # Drop executable scripts in /etc/promptli/autostart.d/ (system-wide) or
@@ -865,6 +976,83 @@ fi
 X
 cp "$INCLUDES/etc/zsh/zshrc" "$INCLUDES/etc/skel/.zshrc"
 
+# ── fbterm config + launcher + framebuffer wallpaper ─────
+mkdir -p "$INCLUDES/usr/share/promptli"
+cat > "$INCLUDES/etc/skel/.fbtermrc" << 'X'
+# promptLi OS fbterm config — Unicode fonts (braille logo renders correctly).
+font-names=Noto Sans Mono,DejaVu Sans Mono
+font-size=13
+text-encodings=UTF-8
+X
+cat > "$INCLUDES/usr/local/bin/promptli-term" << 'X'; chmod +x "$INCLUDES/usr/local/bin/promptli-term"
+#!/bin/sh
+# promptLi OS — modern framebuffer terminal launcher.
+# Draws a Tokyo Night gradient wallpaper straight into /dev/fb0, then runs
+# fbterm on top of it (Unicode fonts + the screenshot as background).
+if [ -n "$FBTERM_BACKGROUND_IMAGE" ]; then
+    exec fbterm
+fi
+python3 /opt/promptli/promptli-wallpaper.py >/dev/null 2>&1
+sleep 0.2
+FBTERM_BACKGROUND_IMAGE=1 exec fbterm
+X
+cat > "$INCLUDES/opt/promptli/promptli-wallpaper.py" << 'X'
+#!/usr/bin/env python3
+"""Draw a Tokyo Night gradient directly into the Linux framebuffer.
+No dependencies: writes raw pixels to /dev/fb0 (32-bit framebuffers)."""
+import mmap, os, sys
+
+FB = "/dev/fb0"
+SYS = "/sys/class/graphics/fb0"
+
+TOP = (0x1a, 0x1b, 0x26)     # Tokyo Night bg
+BOTTOM = (0x0f, 0x0f, 0x15)  # darker floor
+ACCENT = (0xbb, 0x9a, 0xf7)   # purple band
+
+def main():
+    if not os.path.exists(FB):
+        sys.exit(0)
+    try:
+        with open(f"{SYS}/bits_per_pixel") as f:
+            bpp = int(f.read().strip())
+        with open(f"{SYS}/virtual_size") as f:
+            w, h = map(int, f.read().strip().split(","))
+    except Exception:
+        sys.exit(0)
+    if bpp not in (32, 24):
+        sys.exit(0)
+    bytespp = bpp // 8
+    fd = os.open(FB, os.O_RDWR)
+    size = w * h * bytespp
+    mm = mmap.mmap(fd, size, mmap.MAP_SHARED, mmap.PROT_WRITE)
+    buf = bytearray(w * bytespp)
+    for y in range(h):
+        t = y / max(h - 1, 1)
+        r = int(TOP[0] + (BOTTOM[0] - TOP[0]) * t)
+        g = int(TOP[1] + (BOTTOM[1] - TOP[1]) * t)
+        b = int(TOP[2] + (BOTTOM[2] - TOP[2]) * t)
+        # Subtle purple band near the vertical center.
+        d = abs(y - h * 0.42) / (h * 0.08 + 1)
+        if d < 1:
+            k = (1 - d) * 0.35
+            r = int(r + (ACCENT[0] - r) * k)
+            g = int(g + (ACCENT[1] - g) * k)
+            b = int(b + (ACCENT[2] - b) * k)
+        off = y * w * bytespp
+        for x in range(w):
+            buf[x * bytespp] = b          # framebuffer is typically BGRA
+            buf[x * bytespp + 1] = g
+            buf[x * bytespp + 2] = r
+            buf[x * bytespp + 3] = 255
+        mm[off:off + len(buf)] = buf
+    mm.flush()
+    mm.close()
+    os.close(fd)
+
+if __name__ == "__main__":
+    main()
+X
+
 # ── Autostart config system ──────────────────────────────
 mkdir -p "$INCLUDES/etc/promptli/autostart.d" "$INCLUDES/etc/skel/.config/promptli/autostart.d"
 cat > "$INCLUDES/etc/promptli/autostart.d/10-welcome.sh" << 'X'
@@ -881,11 +1069,15 @@ cat > "$INCLUDES/opt/promptli/setup.sh" << 'X'; chmod +x "$INCLUDES/opt/promptli
 #!/bin/sh
 # promptLi first-boot setup: user, zsh default, aido deps, AUR tooling.
 if ! id promptli >/dev/null 2>&1; then
-    useradd -m -s /usr/bin/zsh -G sudo netdev promptli
+    useradd -m -s /usr/bin/zsh -G sudo,netdev,video promptli
     echo "promptli:promptli" | chpasswd
-    cp -r /etc/skel/. /home/promptli/
-    chown -R promptli:promptli /home/promptli
 fi
+# Always sync /etc/skel into the user + root homes (fbtermrc, zshrc, ...)
+# in case the live overlay or a pre-existing home is missing them.
+cp -r /etc/skel/. /home/promptli/ 2>/dev/null || true
+chown -R promptli:promptli /home/promptli 2>/dev/null || true
+cp -f /etc/skel/.fbtermrc /root/.fbtermrc 2>/dev/null || true
+cp -f /etc/skel/.zshrc /root/.zshrc 2>/dev/null || true
 chsh -s /usr/bin/zsh root 2>/dev/null || true
 # promptLi assistant (Claude API) deps — aido's own light deps (PyYAML,
 # requests) come from Debian packages, so no pip install is needed for it.
@@ -906,7 +1098,7 @@ fi
 if command -v mist >/dev/null 2>&1; then
     echo "  [✓] AUR ready: mist install <package>"
 else
-    echo "  [!] mist not available yet (makedeb repo offline) — run: aido \"install mist from AUR\" later, or check https://docs.makedeb.org"
+    echo "  [✓] AUR available via: pacman -S <aur-package> (makedeb)"
 fi
 systemctl disable promptli-setup.service 2>/dev/null || true
 X
@@ -926,8 +1118,17 @@ WantedBy=multi-user.target
 X
 ln -sf /etc/systemd/system/promptli-setup.service "$INCLUDES/etc/systemd/system/multi-user.target.wants/promptli-setup.service"
 
-# Hostname
+# Hostname + hosts (no live-config: we set both ourselves)
 echo "promptli" > "$INCLUDES/etc/hostname"
+cat > "$INCLUDES/etc/hosts" << 'X'
+127.0.0.1	localhost
+127.0.1.1	promptli
+
+# The following lines are desirable for IPv6 capable hosts
+::1		localhost ip6-localhost ip6-loopback
+ff02::1		ip6-allnodes
+ff02::2		ip6-allrouters
+X
 
 # ── Hooks ───────────────────────────────────────────────
 mkdir -p config/hooks/normal
@@ -946,6 +1147,15 @@ if [ -n "$VENDOR_DEB" ] && ! command -v makedeb >/dev/null 2>&1; then
     DEBIAN_FRONTEND=noninteractive dpkg -i --force-overwrite "$VENDOR_DEB" 2>/dev/null || true
     DEBIAN_FRONTEND=noninteractive apt-get install -y -f -qq 2>/dev/null || true
 fi
+# The vendored .deb is a bullseye build whose makedeb-rs links
+# libapt-pkg.so.6.0 — trixie ships .7.0. Replace it with a binary built
+# from source against trixie's apt (vendor/makedeb/makedeb-rs).
+VENDOR_RS=/opt/promptli/vendor/makedeb/makedeb-rs
+if [ -f "$VENDOR_RS" ] && [ -f /usr/share/makedeb/makedeb-rs ]; then
+    cp -f "$VENDOR_RS" /usr/share/makedeb/makedeb-rs
+    chmod +x /usr/share/makedeb/makedeb-rs
+    echo "  [✓] makedeb-rs replaced with trixie build"
+fi
 # Try the makedeb repo for mist (may be offline; setup.sh retries on first boot).
 if ! command -v mist >/dev/null 2>&1; then
     wget -qO- --timeout=10 'https://proget.makedeb.org/releases/makedeb/makedeb.pub' 2>/dev/null | \
@@ -960,20 +1170,59 @@ fi
 if command -v makedeb >/dev/null 2>&1; then echo "  [✓] makedeb installed"; else echo "  [!] makedeb install failed"; fi
 if command -v mist >/dev/null 2>&1; then echo "  [✓] mist installed (AUR ready)"; else echo "  [!] mist not available yet (repo offline; retried at first boot)"; fi
 
-# ── Fast boot tweaks ────────────────────────────────────
-echo "  [*] Applying boot-speed tweaks..."
+# ── Fast boot + low idle RAM tweaks ─────────────────────
+echo "  [*] Applying boot-speed + RAM tweaks..."
 # systemctl needs dbus, which doesn't exist inside a build chroot — masking
 # is just a symlink to /dev/null, so do that directly.
 for unit in systemd-networkd-wait-online.service \
             NetworkManager-wait-online.service \
             ModemManager.service \
             apt-daily.timer apt-daily-upgrade.timer \
-            man-db.timer fstrim.timer; do
+            man-db.timer fstrim.timer \
+            cron.service \
+            wpa_supplicant.service \
+            e2scrub_all.timer e2scrub_reap.service \
+            systemd-tmpfiles-clean.timer; do
     ln -sf /dev/null "/etc/systemd/system/$unit"
 done
 # Raise systemd's default timeout (older/slow disks) and keep quiet boot.
 mkdir -p /etc/systemd/system.conf.d
 printf '[Manager]\nDefaultTimeoutStartSec=45s\nDefaultTimeoutStopSec=20s\n' > /etc/systemd/system.conf.d/promptli.conf
+
+# Cap journald's RAM usage (live sessions run journald in tmpfs).
+mkdir -p /etc/systemd/journald.conf.d
+printf '[Journal]\nRuntimeMaxUse=16M\nRuntimeMaxFileSize=8M\nSystemMaxUse=64M\n' > /etc/systemd/journald.conf.d/promptli.conf
+
+# Fewer virtual terminals: 2 gettys instead of 6 (each ~3MB).
+mkdir -p /etc/systemd/logind.conf.d
+printf '[Login]\nNAutoVTs=2\n' > /etc/systemd/logind.conf.d/promptli.conf
+
+# ── Networking: systemd-networkd + resolved (no NM/dbus bloat) ──
+echo "  [*] Enabling systemd-networkd + resolved..."
+# live-config is gone, so purge it (and the dbus daemon family it dragged
+# in) and replace the system bus with the lighter/faster dbus-broker.
+DEBIAN_FRONTEND=noninteractive apt-get purge -y -qq \
+    live-config live-config-systemd live-config-doc \
+    dbus dbus-bin dbus-daemon dbus-session-bus-common dbus-system-bus-common \
+    2>/dev/null || true
+apt-get autoremove -y -qq 2>/dev/null || true
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq dbus-broker 2>/dev/null || true
+ln -sf /lib/systemd/system/systemd-networkd.service /etc/systemd/system/multi-user.target.wants/systemd-networkd.service
+ln -sf /lib/systemd/system/systemd-networkd.socket /etc/systemd/system/sockets.target.wants/systemd-networkd.socket
+ln -sf /lib/systemd/system/systemd-resolved.service /etc/systemd/system/multi-user.target.wants/systemd-resolved.service
+ln -sf /lib/systemd/system/systemd-resolved.socket /etc/systemd/system/sockets.target.wants/systemd-resolved.socket
+mkdir -p /etc/systemd/network
+cat > /etc/systemd/network/10-wired.network << 'NET'
+[Match]
+Type=ether
+
+[Network]
+DHCP=yes
+
+[DHCP]
+RouteMetric=10
+NET
+ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
 
 # ── NO autologin ──────────────────────────────────────────
 # live-config ships a systemd generator that auto-logs the live user in on
@@ -984,7 +1233,7 @@ rm -f /lib/systemd/system-generators/live-config-getty-generator
 # ── Default user: created at build time (not first boot) ──
 echo "  [*] Creating default user 'promptli'..."
 if ! id promptli >/dev/null 2>&1; then
-    useradd -m -s /usr/bin/zsh -G sudo,netdev promptli
+    useradd -m -s /usr/bin/zsh -G sudo,netdev,video promptli
     echo 'promptli:promptli' | chpasswd
     cp -r /etc/skel/. /home/promptli/ 2>/dev/null || true
     chown -R promptli:promptli /home/promptli
@@ -995,7 +1244,9 @@ chsh -s /usr/bin/zsh root 2>/dev/null || true
 echo "  [*] Fixing permissions..."
 chown -R root:root /opt/promptli /opt/aido
 chmod +x /usr/local/bin/promptli /usr/local/bin/locakhost /usr/local/bin/aido
+chmod +x /usr/local/bin/pacman /usr/local/bin/promptli-term
 chmod +x /opt/promptli/promptli_assistant.py /opt/promptli/promptli_daemon.py /opt/promptli/setup.sh
+chmod +x /opt/promptli/promptli-wallpaper.py
 chmod +x /opt/aido/src/aido.py
 echo "✅ Done."
 HOOK
@@ -1039,11 +1290,13 @@ if [ -f "$ISO_PATH" ]; then
   "release_notes": [
     "Minimal, bloat-free base — no window manager, no desktop environment",
     "aido — private, offline local AI assistant (terminal-first)",
-    "AUR support via mist (makedeb) + pacman",
+    "pacman works: Debian packages via apt, AUR packages built with makedeb",
+    "fbterm console: Unicode fonts (logo renders), wallpaper, 256 colors",
     "zsh with autosuggestions, syntax highlighting, and a git-aware prompt",
-    "Custom fastfetch identity with promptLi OS logo",
+    "systemd-networkd + resolved networking (no NetworkManager bloat)",
+    "Custom fastfetch identity with the promptLi OS logo",
     "Rust TUI installer (promptli-install) + self-updater (promptli-update)",
-    "Fast boot with quiet, minimal services",
+    "Fast, quiet boot with low idle RAM (capped journald, 2 gettys)",
     "locakHost local web server"
   ],
   "default_credentials": {

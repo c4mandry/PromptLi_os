@@ -210,7 +210,7 @@ fn blkid_uuid(dev: &str) -> io::Result<String> {
 fn create_user(root: &Path, username: &str, password: &str) -> io::Result<()> {
     // Use chroot + useradd + chpasswd. zsh is the promptLi default shell.
     let script = format!(
-        "useradd -m -s /usr/bin/zsh -G sudo,netdev {u} 2>/dev/null || true; \
+        "useradd -m -s /usr/bin/zsh -G sudo,netdev,video {u} 2>/dev/null || true; \
          echo '{u}:{p}' | chpasswd",
         u = username,
         p = password
