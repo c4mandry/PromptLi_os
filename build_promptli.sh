@@ -142,6 +142,9 @@ fastfetch fzf eza bat ripgrep fd-find zoxide btop tmux
 # Console utilities
 curl wget git vim htop unzip p7zip-full less
 rsync ca-certificates
+# kbd (loadkeys/setfont) + console-setup (console fonts): the plain console
+# keymap/font loading, so KEYMAP= and FONT= in /etc/vconsole.conf work.
+kbd console-setup
 
 # Networking: systemd-networkd + resolved (lean; no NetworkManager/dbus bloat)
 # wpa_supplicant + iw stay for WiFi
@@ -707,6 +710,24 @@ cat > config/hooks/normal/9999-promptli-customize.hook.chroot << 'HOOK'
 #!/bin/bash
 echo "⚡ Customizing promptLi OS..."
 
+# ── Console keymap: a real vconsole.conf ──────────────────
+# Debian ships /etc/vconsole.conf as a symlink to /etc/default/keyboard,
+# and tmpfiles (usr/lib/tmpfiles.d/debian.conf, type L+) re-creates that
+# link on every boot. systemd-vconsole-setup cannot parse the XKB syntax,
+# so the console silently falls back to the US layout. Replace the link
+# with a real KEYMAP= file and override the tmpfiles rule.
+echo "  [*] Fixing /etc/vconsole.conf keymap..."
+if [ -L /etc/vconsole.conf ]; then
+    rm -f /etc/vconsole.conf
+fi
+printf 'KEYMAP=et\nFONT=Lat2-Terminus16\n' > /etc/vconsole.conf
+mkdir -p /etc/tmpfiles.d
+cat > /etc/tmpfiles.d/vconsole.conf << 'TC'
+# promptLi: keep the keymap set by the build/installer; overrides Debian's
+# debian.conf rule that re-symlinks /etc/vconsole.conf to default/keyboard.
+f /etc/vconsole.conf 0644 root root - KEYMAP=et\nFONT=Lat2-Terminus16\n
+TC
+
 # ── AUR support: makedeb + mist (install AUR packages on Debian) ──
 # makedeb is vendored (vendor/makedeb/*.deb) so the build works offline;
 # mist comes from the makedeb repo and is retried at first boot if it's down.
@@ -809,6 +830,15 @@ ln -sf /lib/systemd/system/systemd-networkd.service /etc/systemd/system/multi-us
 ln -sf /lib/systemd/system/systemd-networkd.socket /etc/systemd/system/sockets.target.wants/systemd-networkd.socket
 ln -sf /lib/systemd/system/systemd-resolved.service /etc/systemd/system/multi-user.target.wants/systemd-resolved.service
 ln -sf /lib/systemd/system/systemd-resolved.socket /etc/systemd/system/sockets.target.wants/systemd-resolved.socket
+
+# ── No display managers on a server distro ─────────────────
+# promptLi OS boots to a console TTY only; purge any display manager that
+# could sneak in through dependency chains (lightdm, gdm3, sddm, xdm).
+echo "  [*] Purging display managers..."
+DEBIAN_FRONTEND=noninteractive apt-get purge -y -qq \
+    lightdm lightdm-gtk-greeter gdm3 sddm xdm 2>/dev/null || true
+apt-get autoremove -y -qq 2>/dev/null || true
+rm -f /etc/systemd/system/display-manager.service
 mkdir -p /etc/systemd/network
 cat > /etc/systemd/network/10-wired.network << 'NET'
 [Match]
@@ -857,6 +887,34 @@ rm -f /lib/systemd/system-generators/live-config-getty-generator
 # clients). TERM=linux gives the plain ASCII prompt everywhere.
 mkdir -p /etc/systemd/system/serial-getty@.service.d
 printf '[Service]\nEnvironment=TERM=linux\n' > /etc/systemd/system/serial-getty@.service.d/term.conf
+
+# ── tty1: Unicode framebuffer console (fbterm) ────────────
+# The main console runs fbterm when a framebuffer exists, so the promptLi
+# logo (braille block glyphs) and Unicode render properly on the screen you
+# log into. Falls back to the plain Linux console on headless/serial
+# machines and VMs without a framebuffer; tty2+/ttyS0 stay plain getty.
+echo "  [*] tty1 -> fbterm (Unicode console)..."
+mkdir -p /etc/systemd/system/getty@tty1.service.d
+cat > /etc/systemd/system/getty@tty1.service.d/promptli-fbterm.conf << 'DROP'
+[Service]
+ExecStart=
+ExecStart=-/usr/local/bin/promptli-getty %I
+DROP
+cat > /usr/local/bin/promptli-getty << 'GTY'
+#!/bin/sh
+# promptLi tty1 launcher: fbterm (Unicode/braille-capable console) when a
+# framebuffer is present; plain agetty otherwise.
+if [ -e /dev/fb0 ] && command -v fbterm >/dev/null 2>&1; then
+    exec fbterm -s 14 -- /bin/login -p
+fi
+exec /sbin/agetty --noclear --login-program /bin/login "tty${1:-1}" 115200 linux
+GTY
+chmod +x /usr/local/bin/promptli-getty
+cat > /root/.fbtermrc << 'RC'
+font-names=DejaVu Sans Mono
+font-size=14
+text-encodings=UTF-8
+RC
 
 # ── Default user: created at build time (not first boot) ──
 echo "  [*] Creating default user 'promptli'..."

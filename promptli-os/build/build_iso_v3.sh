@@ -86,9 +86,7 @@ mmdebstrap \
         curl,wget,git,vim,htop,neofetch,unzip,p7zip-full,\
         scrot,xclip,brightnessctl,arandr,lxappearance,\
         python3,python3-pip,python3-tk,python3-pil,python3-pil.imagetk,\
-        alacritty,thunar,gvfs,gvfs-backends,\
-        lightdm,lightdm-gtk-greeter,policykit-1,\
-        libasound2,libdbus-glib-1-2,libgtk-3-0,libfuse2,fuse,\
+        alacritty,thunar,gvfs,gvfs-backends,\        libasound2,libdbus-glib-1-2,libgtk-3-0,libfuse2,fuse,\
         rsync\
     " \
     trixie \
@@ -170,16 +168,6 @@ mkdir -p "$CHROOT/root/.config/i3" "$CHROOT/root/.config/i3status"
 cp /project/config/i3/config "$CHROOT/root/.config/i3/config"
 cp /project/config/i3/i3status.conf "$CHROOT/root/.config/i3status/config"
 
-# LightDM autologin
-mkdir -p "$CHROOT/etc/lightdm"
-cat > "$CHROOT/etc/lightdm/lightdm.conf" << "LIGHTDM"
-[Seat:*]
-autologin-user=promptli
-autologin-user-timeout=0
-user-session=i3
-greeter-session=lightdm-gtk-greeter
-LIGHTDM
-
 # First-boot setup service
 cat > "$CHROOT/etc/systemd/system/promptli-setup.service" << "UNIT"
 [Unit]
@@ -253,8 +241,6 @@ ln -sf /etc/systemd/system/promptli-setup.service "$CHROOT/etc/systemd/system/mu
 echo "promptli" > "$CHROOT/etc/hostname"
 echo "127.0.0.1 localhost promptli" > "$CHROOT/etc/hosts"
 
-# Enable LightDM
-ln -sf /lib/systemd/system/lightdm.service "$CHROOT/etc/systemd/system/display-manager.service" 2>/dev/null || true
 mkdir -p "$CHROOT/etc/systemd/system/multi-user.target.wants"
 
 # Enable NetworkManager

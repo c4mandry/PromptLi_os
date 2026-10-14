@@ -73,7 +73,6 @@ mmdebstrap \
         scrot,xclip,brightnessctl,arandr,lxappearance,
         python3,python3-pip,python3-tk,python3-pil,python3-pil.imagetk,
         alacritty,thunar,gvfs,gvfs-backends,
-        lightdm,lightdm-gtk-greeter,policykit-1,
         libasound2,libdbus-glib-1-2,libgtk-3-0,libfuse2,fuse,
         rsync
     " \
@@ -155,16 +154,6 @@ promptli &
 STARTUP
 chmod +x "$CHROOT/etc/skel/.config/autostart.sh"
 
-# LightDM autologin
-mkdir -p "$CHROOT/etc/lightdm"
-cat > "$CHROOT/etc/lightdm/lightdm.conf" << "LIGHTDM"
-[Seat:*]
-autologin-user=promptli
-autologin-user-timeout=0
-user-session=i3
-greeter-session=lightdm-gtk-greeter
-LIGHTDM
-
 # First-boot user setup
 cat > "$CHROOT/etc/systemd/system/promptli-setup.service" << "UNIT"
 [Unit]
@@ -243,9 +232,6 @@ echo "127.0.0.1 localhost promptli" > "$CHROOT/etc/hosts"
 # Enable NetworkManager
 ln -sf /lib/systemd/system/NetworkManager.service "$CHROOT/etc/systemd/system/dbus-org.freedesktop.nvideosettings.service" 2>/dev/null || true
 ln -sf /lib/systemd/system/NetworkManager.service "$CHROOT/etc/systemd/system/multi-user.target.wants/NetworkManager.service" 2>/dev/null || true
-
-# Enable LightDM
-ln -sf /lib/systemd/system/lightdm.service "$CHROOT/etc/systemd/system/display-manager.service" 2>/dev/null || true
 
 echo "[3/5] System configured."
 

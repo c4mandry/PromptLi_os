@@ -1,18 +1,25 @@
 //! Install orchestration: unpack squashfs, configure system, bootloader.
+//!
+//! Everything runs offline against the live medium; the only network use is
+//! the best-effort enrollment callback to the website (non-fatal on failure).
 
 use crate::common::{InstallState, LIVE_SQUASHFS_PATHS};
-use crate::disk::{partition_disk, umount, mount, PartitionScheme, PartitionResult};
+use crate::disk::{partition_disk, umount, mount, PartitionResult, PartitionScheme};
 use crate::http_client::enroll;
-use crate::proc::{self, run, run_streaming};
+use crate::proc::{self, run};
 use std::io;
 use std::path::{Path, PathBuf};
 
 pub struct InstallOptions {
     pub disk: String,
     pub layout: PartitionScheme,
+    pub swap: bool,
     pub hostname: String,
     pub username: String,
     pub password: String,
+    pub root_password: String,
+    pub keymap: String,
+    pub timezone: String,
     pub site_url: String,
     pub version: String,
 }
@@ -43,7 +50,7 @@ pub fn run_install(
         .into_iter()
         .find(|d| d.name == opts.disk)
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "target disk disappeared"))?;
-    let parts: PartitionResult = partition_disk(&disk, opts.layout, &opts.hostname)?;
+    let parts: PartitionResult = partition_disk(&disk, opts.layout, &opts.hostname, opts.swap)?;
 
     progress("Mounting root");
     mount(&parts.root, target_dir)?;
@@ -63,17 +70,23 @@ pub fn run_install(
             .unwrap_or(false)
     {
         // unsquashfs into the target. Force-overwrite to be idempotent.
-        run_streaming(
+        // Output is captured (not streamed) so it can't corrupt the TUI.
+        run(
             "unsquashfs",
-            &["-f", "-d", target_dir.to_str().unwrap_or(""), live_root.to_str().unwrap_or("")],
+            &[
+                "-f",
+                "-no-progress",
+                "-d",
+                target_dir.to_str().unwrap_or(""),
+                live_root.to_str().unwrap_or(""),
+            ],
         )?;
     } else {
         // It's likely an already-unpacked rootfs (e.g. /run/live/rootfs) — copy.
-        run_streaming(
+        run(
             "rsync",
             &[
                 "-aAXx",
-                "--info=progress2",
                 &format!("{}/", live_root.display()),
                 target_dir.to_str().unwrap_or(""),
             ],
@@ -84,8 +97,15 @@ pub fn run_install(
     progress("Writing configuration");
     write_hostname(target_dir, &opts.hostname)?;
     write_fstab(target_dir, &parts)?;
+    write_keymap(target_dir, &opts.keymap)?;
+    write_timezone(target_dir, &opts.timezone)?;
     enable_serial_console(target_dir)?;
-    create_user(target_dir, &opts.username, &opts.password)?;
+    create_user(
+        target_dir,
+        &opts.username,
+        &opts.password,
+        &opts.root_password,
+    )?;
 
     // ── Bootloader ────────────────────────────────────────
     progress("Installing bootloader");
@@ -95,7 +115,7 @@ pub fn run_install(
     progress("Enabling updater");
     install_updater_files(target_dir)?;
 
-    // ── Enrollment callback to the website ────────────────
+    // ── Enrollment callback to the website (best-effort) ──
     progress("Registering with server");
     let machine_id = read_machine_id(target_dir)?;
     let token = enroll(&opts.site_url, &opts.version, &opts.hostname, &machine_id)
@@ -146,7 +166,68 @@ fn write_fstab(root: &Path, parts: &PartitionResult) -> io::Result<()> {
         let esp_uuid = blkid_uuid(esp)?;
         fstab.push_str(&format!("UUID={esp_uuid} /boot/efi vfat umask=0077 0 1\n"));
     }
+    if let Some(swap) = &parts.swap {
+        let swap_uuid = blkid_uuid(swap)?;
+        fstab.push_str(&format!("UUID={swap_uuid} none swap sw 0 0\n"));
+    }
     std::fs::write(root.join("etc/fstab"), fstab)?;
+    Ok(())
+}
+
+/// Console keymap: set both the systemd vconsole keymap and Debian's
+/// console-setup default so it survives reboots.
+fn write_keymap(root: &Path, keymap: &str) -> io::Result<()> {
+    let keymap = keymap.trim();
+    if keymap.is_empty() {
+        return Ok(());
+    }
+    // Debian's console-setup ships /etc/vconsole.conf as a symlink to
+    // /etc/default/keyboard; replace it with a real file or the keyboard
+    // write below would clobber the KEYMAP we just set.
+    let vconsole = root.join("etc/vconsole.conf");
+    if let Ok(meta) = std::fs::symlink_metadata(&vconsole) {
+        if meta.file_type().is_symlink() {
+            let _ = std::fs::remove_file(&vconsole);
+        }
+    }
+    std::fs::write(
+        &vconsole,
+        format!("KEYMAP={keymap}\nFONT=Lat2-Terminus16\n"),
+    )?;
+    let keyboard = format!(
+        "XKBMODEL=\"pc105\"\nXKBLAYOUT=\"{keymap}\"\nXKBVARIANT=\"\"\nXKBOPTIONS=\"\"\n"
+    );
+    std::fs::write(root.join("etc/default/keyboard"), keyboard)?;
+    // Debian's tmpfiles rule (usr/lib/tmpfiles.d/debian.conf) re-symlinks
+    // /etc/vconsole.conf to /etc/default/keyboard on every boot (L+).
+    // Override it from /etc/tmpfiles.d — which takes precedence over
+    // /usr/lib/tmpfiles.d — so the keymap set here survives reboots.
+    std::fs::create_dir_all(root.join("etc/tmpfiles.d"))?;
+    std::fs::write(
+        root.join("etc/tmpfiles.d/vconsole.conf"),
+        format!(
+            "# promptLi: keep the installer's console keymap; overrides Debian's\n\
+             # debian.conf rule that re-symlinks /etc/vconsole.conf to default/keyboard.\n\
+             f /etc/vconsole.conf 0644 root root - KEYMAP={keymap}\\nFONT=Lat2-Terminus16\\n\n"
+        ),
+    )?;
+    Ok(())
+}
+
+/// Set the system timezone via /etc/localtime symlink + /etc/timezone.
+fn write_timezone(root: &Path, tz: &str) -> io::Result<()> {
+    let tz = tz.trim();
+    if tz.is_empty() {
+        return Ok(());
+    }
+    let zoneinfo = root.join("usr/share/zoneinfo").join(tz);
+    if !zoneinfo.exists() {
+        eprintln!("warning: unknown timezone {tz} — keeping UTC");
+        return Ok(());
+    }
+    let _ = std::fs::remove_file(root.join("etc/localtime"));
+    std::os::unix::fs::symlink(format!("/usr/share/zoneinfo/{tz}"), root.join("etc/localtime"))?;
+    std::fs::write(root.join("etc/timezone"), format!("{tz}\n"))?;
     Ok(())
 }
 
@@ -157,15 +238,13 @@ fn enable_serial_console(root: &Path) -> io::Result<()> {
     let grub_defaults = root.join("etc/default/grub");
     let mut content = std::fs::read_to_string(&grub_defaults).unwrap_or_default();
 
-    // Set (or replace) a GRUB_* key with a single value in the defaults file.
     fn ensure(content: &mut String, key: &str, value: &str) {
         let line = format!("{key}=\"{value}\"");
         let mut found = false;
         let mut out = String::new();
         for l in content.lines() {
             let trimmed = l.trim_start();
-            let matched = trimmed.starts_with(key)
-                && !trimmed.starts_with(&format!("{key}_"));
+            let matched = trimmed.starts_with(key) && !trimmed.starts_with(&format!("{key}_"));
             if matched && !found {
                 out.push_str(&line);
                 out.push('\n');
@@ -207,14 +286,25 @@ fn blkid_uuid(dev: &str) -> io::Result<String> {
     Ok(uuid)
 }
 
-fn create_user(root: &Path, username: &str, password: &str) -> io::Result<()> {
+fn create_user(
+    root: &Path,
+    username: &str,
+    password: &str,
+    root_password: &str,
+) -> io::Result<()> {
     // Use chroot + useradd + chpasswd. zsh is the promptLi default shell.
-    let script = format!(
+    let mut script = format!(
         "useradd -m -s /usr/bin/zsh -G sudo,netdev,video {u} 2>/dev/null || true; \
          echo '{u}:{p}' | chpasswd",
         u = username,
         p = password
     );
+    if root_password.is_empty() {
+        // Lock root (sudo via the primary user only).
+        script.push_str("; passwd -l root 2>/dev/null || true");
+    } else {
+        script.push_str(&format!("; echo 'root:{rp}' | chpasswd", rp = root_password));
+    }
     run("chroot", &[root.to_str().unwrap_or(""), "/bin/sh", "-c", &script])?;
     Ok(())
 }
@@ -290,10 +380,6 @@ fn install_updater_files(root: &Path) -> io::Result<()> {
             }
         }
     }
-
-    // A small convenience hook: `promptli-update` still exists for humans who
-    // type it, but it just runs the real package upgrade. The installer ships
-    // the binary; here we install a systemd timer that runs the equivalent.
     let _ = root;
     Ok(())
 }
