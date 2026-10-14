@@ -3,9 +3,9 @@
 
 Command-line interface for the AIDO agent.
 
-- ``aido``            → prints this help (nothing happens by default)
+- ``aido``            → full-screen chat TUI (first run asks 2 questions)
+- ``aido chat``       → same TUI (line REPL when stdin is not a terminal)
 - ``aido "question"`` → one-shot natural-language command
-- ``aido chat``       → interactive terminal REPL
 - ``aido tools``      → list available tools
 - ``aido setup``      → download a local model + install the LLM backend
 
@@ -30,9 +30,9 @@ def build_parser() -> argparse.ArgumentParser:
         description="AIDO — a local, private AI assistant that controls your promptLi OS machine from the terminal.",
         epilog=(
             "Examples:\n"
+            "  aido                open the full-screen chat TUI\n"
             "  aido \"show disk usage\"\n"
             "  aido \"install htop\"\n"
-            "  aido chat\n"
             "  aido tools"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -153,13 +153,58 @@ def _run_setup() -> int:
     return 0
 
 
+def _run_tui(args: argparse.Namespace) -> int:
+    """Full-screen chat TUI (bare `aido` or `aido chat`).
+
+    Degrades gracefully: a missing model gives the friendly `aido setup`
+    hint, and a terminal without curses support falls back to the line REPL.
+    """
+    from tui import ensure_config, run_tui
+
+    try:
+        config = ensure_config(args.config)
+    except Exception as exc:
+        _print_error(str(exc))
+        return 1
+    utils.setup_logging(
+        log_dir=config.get("logging", {}).get("dir"),
+        level=config.get("logging", {}).get("level", "INFO"),
+    )
+    try:
+        model_path = utils.resolve_model_path(explicit=args.model, config=config)
+    except utils.AidoError as exc:
+        _print_error(str(exc))
+        print("Tip: run `aido setup` to install the local model first.")
+        return 1
+    try:
+        import curses
+
+        return run_tui(
+            lambda: Agent(model_path=str(model_path), config=config),
+            config,
+            str(model_path),
+        )
+    except curses.error:
+        # Terminal cannot do curses (TERM unset/dumb, serial vt220, …) —
+        # fall back to the plain line REPL.
+        try:
+            agent = Agent(model_path=str(model_path), config=config)
+        except utils.AidoError as exc:
+            _print_error(str(exc))
+            print("Tip: run `aido setup` to install the local model first.")
+            return 1
+        try:
+            return _repl(agent, assume_yes=args.yes, verbose=args.verbose)
+        finally:
+            agent.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
-    # Bare `aido` → show help, exactly like --help.
+    # Bare `aido` → the full-screen chat TUI.
     if not args.command and not args.list_tools:
-        build_parser().print_help()
-        return 0
+        return _run_tui(args)
 
     if args.list_tools:
         _print_tools()
@@ -174,19 +219,23 @@ def main(argv: list[str] | None = None) -> int:
         if head == "setup":
             return _run_setup()
         if head == "chat":
-            try:
-                agent, _config = _load_agent(args)
-            except utils.AidoError as exc:
-                _print_error(str(exc))
-                print("Tip: run `aido setup` to install the local model first.")
-                return 1
-            try:
-                return _repl(agent, assume_yes=args.yes, verbose=args.verbose)
-            except utils.AidoError as exc:
-                _print_error(str(exc))
-                return 1
-            finally:
-                agent.close()
+            # Piped/redirected stdin keeps the old line-REPL; a real
+            # terminal gets the full-screen TUI.
+            if not sys.stdin.isatty():
+                try:
+                    agent, _config = _load_agent(args)
+                except utils.AidoError as exc:
+                    _print_error(str(exc))
+                    print("Tip: run `aido setup` to install the local model first.")
+                    return 1
+                try:
+                    return _repl(agent, assume_yes=args.yes, verbose=args.verbose)
+                except utils.AidoError as exc:
+                    _print_error(str(exc))
+                    return 1
+                finally:
+                    agent.close()
+            return _run_tui(args)
 
     # One-shot natural-language command.
     try:

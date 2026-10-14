@@ -150,8 +150,17 @@ class Agent:
 
     # -- conversation ------------------------------------------------------
 
-    def chat(self, message: str, interactive: bool | None = None, assume_yes: bool = False) -> dict[str, Any]:
+    def chat(
+        self,
+        message: str,
+        interactive: bool | None = None,
+        assume_yes: bool = False,
+        stream_callback: Any = None,
+    ) -> dict[str, Any]:
         """Process one user message.
+
+        *stream_callback*, when given, receives each text token as it is
+        generated (used by the TUI to render streaming replies).
 
         Returns ``{"answer": str, "tool_calls": [...], "iterations": int}``.
         """
@@ -162,7 +171,7 @@ class Agent:
         ]
         tool_calls: list[dict[str, Any]] = []
         for iteration in range(self.max_iterations):
-            content = self._generate(messages)
+            content = self._generate(messages, stream_callback=stream_callback)
             self.history.append({"role": "assistant", "content": content})
             messages.append({"role": "assistant", "content": content})
             parsed = utils.extract_json(content)
@@ -253,13 +262,32 @@ class Agent:
         logger.info("tool=%s arguments=%s result=%s", name, arguments, result)
         return result
 
-    def _generate(self, messages: list[dict[str, str]]) -> str:
+    def _generate(self, messages: list[dict[str, str]], stream_callback: Any = None) -> str:
         kwargs = {
             "messages": messages,
             "max_tokens": self.max_tokens,
             "temperature": self.temperature,
             "top_p": self.top_p,
         }
+        if stream_callback is not None:
+            # Streaming path: accumulate deltas and hand each one to the
+            # callback. response_format cannot be combined with streaming,
+            # so the JSON grammar is skipped here.
+            try:
+                stream = self.model.create_chat_completion(**kwargs, stream=True)
+                parts: list[str] = []
+                for chunk in stream:
+                    if not isinstance(chunk, dict):
+                        chunk = dict(chunk)
+                    choices = chunk.get("choices") or []
+                    delta = (choices[0].get("delta") or {}).get("content") if choices else ""
+                    if delta:
+                        parts.append(delta)
+                        stream_callback(delta)
+                return "".join(parts).strip()
+            except (TypeError, ValueError):
+                # Backend does not support streaming — fall through.
+                pass
         try:
             # Force valid JSON via a GBNF grammar where supported.
             completion = self.model.create_chat_completion(
@@ -267,7 +295,10 @@ class Agent:
             )
         except (TypeError, ValueError):
             completion = self.model.create_chat_completion(**kwargs)
-        return (completion["choices"][0]["message"]["content"] or "").strip()
+        content = (completion["choices"][0]["message"]["content"] or "").strip()
+        if stream_callback is not None and content:
+            stream_callback(content)
+        return content
 
     def reset(self) -> None:
         """Forget the conversation history."""
