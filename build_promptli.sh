@@ -722,9 +722,17 @@ if [ -L /etc/vconsole.conf ]; then
 fi
 printf 'KEYMAP=et\nFONT=Lat2-Terminus16\n' > /etc/vconsole.conf
 mkdir -p /etc/tmpfiles.d
-cat > /etc/tmpfiles.d/vconsole.conf << 'TC'
-# promptLi: keep the keymap set by the build/installer; overrides Debian's
-# debian.conf rule that re-symlinks /etc/vconsole.conf to default/keyboard.
+# An /etc/tmpfiles.d file only shadows a /usr/lib one with the SAME name;
+# keep Debian's other rules and replace the vconsole symlink rule with a
+# keymap file, or tmpfiles would re-create the link on every boot.
+cat > /etc/tmpfiles.d/debian.conf << 'TC'
+# promptLi: shadows Debian's debian.conf — keeps the console keymap instead
+# of re-symlinking /etc/vconsole.conf to /etc/default/keyboard.
+L /run/shm - - - - /dev/shm
+d /run/sendsigs.omit.d 0755 root root -
+d /run/lock 1777 root root -
+L+ /etc/mtab - - - - ../proc/self/mounts
+L+ /etc/default/locale - - - - ../locale.conf
 f /etc/vconsole.conf 0644 root root - KEYMAP=et\nFONT=Lat2-Terminus16\n
 TC
 

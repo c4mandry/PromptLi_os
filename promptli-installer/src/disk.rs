@@ -117,7 +117,8 @@ pub fn partition_disk(
                 Some(mb) => format!("label: gpt\n,512M,U,\n,{mb}M,S,\n,,L\n"),
                 None => "label: gpt\n,512M,U,\n,,L\n".to_string(),
             };
-            proc::run("sfdisk", &["--wipe", "always", &dev])?;
+            // (sgdisk --zap-all + wipefs --all above already cleaned the
+            // disk; sfdisk itself creates the fresh GPT with the script.)
             write_stdin("sfdisk", &[&dev], &script)?;
 
             proc::run("mkfs.fat", &["-F32", "-n", "EFI", &esp])?;

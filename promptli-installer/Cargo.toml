@@ -17,9 +17,10 @@ path = "src/main.rs"
 [dependencies]
 # Terminal UI (modern, no system deps)
 ratatui = "0.28"
-crossterm = "0.28"
-
-# (crossterm doesn't need these features; kept minimal)
+# use-dev-tty: read input via poll(2) on the tty instead of mio+epoll on
+# stdin — epoll input delivery is unreliable on serial consoles (headless
+# servers, IPMI), and poll() is proven to work there.
+crossterm = { version = "0.28", features = ["use-dev-tty"] }
 
 # Serialization for /etc/promptli/install.json + API JSON
 serde = { version = "1", features = ["derive"] }

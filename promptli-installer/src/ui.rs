@@ -26,6 +26,22 @@ const DANGER: Color = Color::Rgb(0xf7, 0x76, 0x8e);
 
 type Term = Terminal<CrosstermBackend<io::Stdout>>;
 
+/// Append a line to /tmp/promptli-install-debug.log when PROMPTLI_TUI_DEBUG
+/// is set (used to diagnose terminal input problems; inert otherwise).
+fn tui_debug(msg: &str) {
+    use std::io::Write;
+    if std::env::var_os("PROMPTLI_TUI_DEBUG").is_none() {
+        return;
+    }
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("/tmp/promptli-install-debug.log")
+    {
+        let _ = writeln!(f, "{} {msg}", std::process::id());
+    }
+}
+
 /// The high-level screens. Each `Settings*` screen edits one field; `Menu` is
 /// the archinstall-style launcher list.
 #[derive(Clone, Copy, PartialEq)]
@@ -140,17 +156,27 @@ fn run_loop(terminal: &mut Term, disks: Vec<Disk>) -> io::Result<Option<Config>>
     let mut picker_sel = 0usize;
     let mut input = Input::None;
     let mut progress_lines: Vec<String> = Vec::new();
+    let mut frames: u64 = 0;
+    tui_debug("run_loop started");
 
     loop {
         terminal.draw(|f| match screen {
             Screen::Done => draw_done(f, &progress_lines),
             _ => draw_menu(f, screen, &menu_state, &cfg, &disks, &input, disk_sel, picker_sel),
         })?;
+        frames += 1;
 
-        if !event::poll(std::time::Duration::from_millis(60))? {
+        let polled = event::poll(std::time::Duration::from_millis(60))?;
+        if !polled {
+            if frames % 64 == 0 {
+                tui_debug(&format!("heartbeat frame={frames} poll=false"));
+            }
             continue;
         }
-        let Event::Key(key) = event::read()? else { continue };
+        tui_debug("poll=true");
+        let ev = event::read()?;
+        tui_debug(&format!("read event={ev:?}"));
+        let Event::Key(key) = ev else { continue };
         if key.kind != KeyEventKind::Press {
             continue;
         }

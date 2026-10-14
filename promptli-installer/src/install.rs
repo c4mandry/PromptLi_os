@@ -199,15 +199,20 @@ fn write_keymap(root: &Path, keymap: &str) -> io::Result<()> {
     );
     std::fs::write(root.join("etc/default/keyboard"), keyboard)?;
     // Debian's tmpfiles rule (usr/lib/tmpfiles.d/debian.conf) re-symlinks
-    // /etc/vconsole.conf to /etc/default/keyboard on every boot (L+).
-    // Override it from /etc/tmpfiles.d — which takes precedence over
-    // /usr/lib/tmpfiles.d — so the keymap set here survives reboots.
+    // /etc/vconsole.conf to /etc/default/keyboard on every boot (L+). An
+    // /etc/tmpfiles.d file with the SAME name shadows it entirely — keep
+    // Debian's other rules and replace the vconsole link with a keymap file.
     std::fs::create_dir_all(root.join("etc/tmpfiles.d"))?;
     std::fs::write(
-        root.join("etc/tmpfiles.d/vconsole.conf"),
+        root.join("etc/tmpfiles.d/debian.conf"),
         format!(
-            "# promptLi: keep the installer's console keymap; overrides Debian's\n\
-             # debian.conf rule that re-symlinks /etc/vconsole.conf to default/keyboard.\n\
+            "# promptLi: shadows Debian's debian.conf — keeps the console keymap\n\
+             # instead of re-symlinking /etc/vconsole.conf to default/keyboard.\n\
+             L /run/shm - - - - /dev/shm\n\
+             d /run/sendsigs.omit.d 0755 root root -\n\
+             d /run/lock 1777 root root -\n\
+             L+ /etc/mtab - - - - ../proc/self/mounts\n\
+             L+ /etc/default/locale - - - - ../locale.conf\n\
              f /etc/vconsole.conf 0644 root root - KEYMAP={keymap}\\nFONT=Lat2-Terminus16\\n\n"
         ),
     )?;
