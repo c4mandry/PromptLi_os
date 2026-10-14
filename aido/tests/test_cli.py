@@ -1,7 +1,8 @@
 """Smoke tests for the CLI entry point (no model or optional deps needed).
 
 AIDO is terminal-only: the GUI/tray/voice flags are gone, and running bare
-``aido`` prints the help text (same as --help).
+``aido`` opens the full-screen chat TUI (falling back to the line REPL when
+no tty is available).
 """
 
 import sys
@@ -27,12 +28,12 @@ def _patch_cli_env(monkeypatch):
     monkeypatch.setattr(aido, "Agent", FakeAgent)
 
 
-def test_bare_aido_prints_help(capsys):
-    """Running `aido` with no arguments prints help and exits 0."""
+def test_bare_aido_opens_tui(monkeypatch):
+    """Running `aido` with no arguments goes to the TUI path (degrading to the
+    line REPL when there is no terminal), and exits 0."""
+    _patch_cli_env(monkeypatch)
+    monkeypatch.setattr(aido, "_repl", lambda *a, **k: 0)
     assert aido.main([]) == 0
-    out = capsys.readouterr().out
-    assert "usage: aido" in out
-    assert "chat" in out
 
 
 def test_help_flag_prints_help(capsys):
