@@ -16,6 +16,28 @@ pub const LIVE_SQUASHFS_PATHS: &[&str] = &[
 /// Default website base URL used for enrollment.
 pub const DEFAULT_SITE_URL: &str = "https://webnotes.work";
 
+/// The running OS version: `PROMPTLI_VERSION` env (set at login via
+/// /etc/profile.d/promptli-version.sh), falling back to /etc/os-release's
+/// VERSION_ID so fastfetch and the installer agree on the same number.
+pub fn distro_version() -> String {
+    if let Ok(v) = std::env::var("PROMPTLI_VERSION") {
+        if !v.trim().is_empty() {
+            return v;
+        }
+    }
+    if let Ok(release) = std::fs::read_to_string("/etc/os-release") {
+        for line in release.lines() {
+            if let Some(val) = line.strip_prefix("VERSION_ID=") {
+                let v = val.trim().trim_matches('"');
+                if !v.is_empty() {
+                    return v.to_string();
+                }
+            }
+        }
+    }
+    "1.0.0".to_string()
+}
+
 /// Machine state written onto the installed system after a successful install.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InstallState {

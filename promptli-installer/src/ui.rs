@@ -414,7 +414,7 @@ fn start_install(terminal: &mut Term, cfg: &mut Config, lines: &mut Vec<String>)
         keymap: cfg.keymap.clone(),
         timezone: cfg.timezone.clone(),
         site_url: cfg.site_url.clone(),
-        version: std::env::var("PROMPTLI_VERSION").unwrap_or_else(|_| "1.0.0".to_string()),
+        version: crate::common::distro_version(),
     };
     let _ = terminal.draw(|f| draw_progress(f, lines));
     let result = crate::install::run_install(&opts, |step| {
@@ -461,7 +461,7 @@ fn draw_menu(
         .constraints([Constraint::Length(3), Constraint::Min(0), Constraint::Length(3)])
         .split(f.area());
 
-    let version = std::env::var("PROMPTLI_VERSION").unwrap_or_else(|_| "1.0.0".to_string());
+    let version = crate::common::distro_version();
     let title = Paragraph::new(Line::from(vec![
         Span::styled(
             format!("promptLi OS {version} — Installer"),

@@ -6,6 +6,11 @@
 # ================================================================
 set -euo pipefail
 
+# Versioning: major is set by hand. Minor counts features/big changes since
+# v1.0.0 (see git history); patch counts every bug fix, however small.
+VERSION="1.21.46"
+ISO_NAME="promptli-os-${VERSION}-amd64"
+
 echo "================================================"
 echo "  promptLi OS — Native x86_64 ISO Builder"
 echo "================================================"
@@ -16,10 +21,9 @@ echo "  2. Build a custom, minimal Debian live ISO (server-focused, no WM/DE):"
 echo "     - promptLi AI Assistant (Claude API + system control)"
 echo "     - locakHost web server (terminal: just type 'locakhost')"
 echo "     - Rust TUI installer (promptli-install); updates via apt/pacman -Syu"
-echo "  3. Output: promptli-os-1.0.0-amd64.iso"
+echo "  3. Output: promptli-os-${VERSION}-amd64.iso"
 echo ""
 
-ISO_NAME="promptli-os-1.0.0-amd64"
 # NOTE: /tmp on this host is a tmpfs mounted with 'nodev', which breaks
 # device-node creation inside the chroot (debootstrap/dpkg need /dev/null,
 # /dev/pts, etc.). Build under a real filesystem (/ is ext4) instead.
@@ -72,7 +76,7 @@ lb config noauto \
     --debian-installer none \
     --iso-application "promptLi OS" \
     --iso-publisher "promptLi" \
-    --iso-volume "promptLi OS 1.0.0" \
+    --iso-volume "promptLi OS ${VERSION}" \
     --linux-flavours amd64 \
     --memtest none \
     --binary-images iso-hybrid
@@ -92,26 +96,26 @@ timeout 0
 include live.cfg
 X
 
-cat > config/bootloaders/syslinux_common/live.cfg.in << 'X'
+cat > config/bootloaders/syslinux_common/live.cfg.in << X
 label live
-	menu label ^promptLi OS 1.0.0
+	menu label ^promptLi OS ${VERSION}
 	menu default
 	linux @LINUX@
 	initrd @INITRD@
 	append @APPEND_LIVE@
 
 label live-failsafe
-	menu label promptLi OS 1.0.0 (fail-safe mode)
+	menu label promptLi OS ${VERSION} (fail-safe mode)
 	linux @LINUX@
 	initrd @INITRD@
 	append @APPEND_LIVE_FAILSAFE@
 X
 
-cat > config/bootloaders/grub-pc/grub.cfg << 'X'
+cat > config/bootloaders/grub-pc/grub.cfg << X
 set default=0
 set timeout=0
 
-menuentry "promptLi OS 1.0.0" {
+menuentry "promptLi OS ${VERSION}" {
 	linux	@KERNEL_LIVE@ @APPEND_LIVE@
 	initrd	@INITRD_LIVE@
 }
@@ -260,7 +264,7 @@ esac
 
 case "$1" in
     -V|--version)
-        echo "pacman (promptLi OS wrapper) 1.0.0"
+        echo "pacman (promptLi OS wrapper) $(. /etc/os-release 2>/dev/null; echo "$VERSION_ID")"
         echo "Debian/apt frontend with AUR support via makedeb"
         ;;
     -S)
@@ -386,11 +390,11 @@ fi
 
 # ── OS identity: promptLi OS, not "Debian" ────────────────
 mkdir -p "$INCLUDES/etc" "$INCLUDES/usr/lib/os-release"
-cat > "$INCLUDES/etc/os-release" << 'X'
-PRETTY_NAME="promptLi OS 1.0.0 (L1-433)"
+cat > "$INCLUDES/etc/os-release" << X
+PRETTY_NAME="promptLi OS ${VERSION} (L1-433)"
 NAME="promptLi OS"
-VERSION_ID="1.0.0"
-VERSION="1.0.0 (L1-433)"
+VERSION_ID="${VERSION}"
+VERSION="${VERSION} (L1-433)"
 VERSION_CODENAME=l1-433
 ID=promptli
 ID_LIKE=debian
@@ -404,9 +408,9 @@ ln -sf /etc/os-release "$INCLUDES/usr/lib/os-release"
 
 # ── Console login notice (MOTD + /etc/issue) ─────────────
 mkdir -p "$INCLUDES/etc"
-cat > "$INCLUDES/etc/motd" << 'X'
+cat > "$INCLUDES/etc/motd" << X
 
-  promptLi OS 1.0.0 (L1-433) - minimal server-focused Debian
+  promptLi OS ${VERSION} (L1-433) - minimal server-focused Debian
 
   Assistant:  aido             AI:           aido chat
   Packages:   pacman -S pkg    AUR:          pacman -S <aur-pkg>
@@ -415,6 +419,9 @@ cat > "$INCLUDES/etc/motd" << 'X'
   Terminal:   promptli-term    Docs:         https://webnotes.work/os
 
 X
+# Export the version for the Rust installer/updater (reads PROMPTLI_VERSION).
+mkdir -p "$INCLUDES/etc/profile.d"
+printf 'export PROMPTLI_VERSION=%s\n' "$VERSION" > "$INCLUDES/etc/profile.d/promptli-version.sh"
 cat > "$INCLUDES/etc/issue" << 'X'
 \S{PRETTY_NAME} \n \l
 
@@ -1012,7 +1019,7 @@ if [ -f "$ISO_PATH" ]; then
     cat > "$OUTPUT_DIR/latest.json" << JSON
 {
   "name": "promptLi OS",
-  "version": "1.0.0",
+  "version": "${VERSION}",
   "codename": "L1-433",
   "base": "Debian 13 (trixie)",
   "arch": "amd64",

@@ -214,7 +214,7 @@ fn install_and_report(cfg: &Config) -> i32 {
 }
 
 fn env_version() -> String {
-    std::env::var("PROMPTLI_VERSION").unwrap_or_else(|_| "1.0.0".to_string())
+    crate::common::distro_version()
 }
 
 fn print_usage() {
