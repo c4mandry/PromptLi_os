@@ -8,7 +8,7 @@ set -euo pipefail
 
 # Versioning: major is set by hand. Minor counts features/big changes since
 # v1.0.0 (see git history); patch counts every bug fix, however small.
-VERSION="1.21.46"
+VERSION="1.21.47"
 ISO_NAME="promptli-os-${VERSION}-amd64"
 
 echo "================================================"
@@ -958,11 +958,19 @@ DROP
 cat > /usr/local/bin/promptli-getty << 'GTY'
 #!/bin/sh
 # promptLi tty1 launcher: fbterm (Unicode/braille-capable console) when a
-# framebuffer is present; plain agetty otherwise.
-if [ -e /dev/fb0 ] && command -v fbterm >/dev/null 2>&1; then
-    exec fbterm -s 14 -- /bin/login -p
+# framebuffer exists AND fbterm actually starts. If fbterm fails (some GPUs
+# / DRM framebuffers it cannot handle), fall back to the plain Linux console
+# so a login prompt is ALWAYS available — a broken tty1 must never lock the
+# user out. The failure is remembered for this boot via a stamp file.
+TTY="tty${1:-1}"
+STAMP=/run/promptli-no-fbterm
+if [ -e /dev/fb0 ] && command -v fbterm >/dev/null 2>&1 && [ ! -e "$STAMP" ]; then
+    if fbterm -s 14 -- /bin/login -p; then
+        exit 0
+    fi
+    : > "$STAMP" 2>/dev/null || true
 fi
-exec /sbin/agetty --noclear --login-program /bin/login "tty${1:-1}" 115200 linux
+exec /sbin/agetty --noclear --login-program /bin/login "$TTY" 115200 linux
 GTY
 chmod +x /usr/local/bin/promptli-getty
 cat > /root/.fbtermrc << 'RC'
