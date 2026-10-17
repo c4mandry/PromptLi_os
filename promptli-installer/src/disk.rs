@@ -43,8 +43,14 @@ pub fn discover_disks(min_bytes: u64) -> io::Result<Vec<Disk>> {
         for dev in items {
             let name = dev["name"].as_str().unwrap_or("").to_string();
             // Skip loop devices (the live squashfs sits on one), fd/floppy,
-            // and sr*/cdrom.
-            if name.starts_with("loop") || name.starts_with("sr") || name.starts_with("fd") {
+            // sr*/cdrom, and ZFS/device-mapper pseudo devices (dm-, md-).
+            if name.starts_with("loop")
+                || name.starts_with("sr")
+                || name.starts_with("fd")
+                || name.starts_with("dm-")
+                || name.starts_with("md")
+                || name.starts_with("zd")
+            {
                 continue;
             }
             let size_bytes = dev["size"]
@@ -55,10 +61,15 @@ pub fn discover_disks(min_bytes: u64) -> io::Result<Vec<Disk>> {
             if size_bytes < min_bytes {
                 continue;
             }
+            // In a VM the virtio/scsi disk has TRAN=null and MODEL=null; the
+            // device name (vda/sda/nvme0n1) carries the info, so we still
+            // list it. The removable flag is kept so the UI can warn, but we
+            // do NOT auto-skip removable here — that's a user decision on the
+            // disk-select screen.
             disks.push(Disk {
                 name,
                 size_bytes,
-                model: dev["model"].as_str().unwrap_or("").to_string(),
+                model: dev["model"].as_str().unwrap_or("").trim().to_string(),
                 removable: dev["rm"].as_bool().unwrap_or(false),
             });
         }
@@ -98,6 +109,16 @@ pub fn partition_disk(
     let _ = proc::run("sgdisk", &["--zap-all", &dev]);
     let _ = proc::run("wipefs", &["--all", &dev]);
 
+    // Refresh partition nodes after sfdisk below writes the table. In VMs
+    // (virtio/vda) the kernel's BLKRRPART re-read is sometimes a no-op or
+    // fails silently, so /dev/vda1 etc. would not exist when we go to mkfs.
+    // partprobe + udevadm settle makes this reliable across qemu/KVM/etc.
+    let settle_devs = || {
+        let _ = proc::run("partprobe", &[&dev]);
+        let _ = proc::run("udevadm", &["settle"]);
+        let _ = proc::run("partprobe", &[&dev]);
+    };
+
     let swap_mb = if swap { swap_size_mb(disk.size_bytes) } else { None };
 
     // Partition numbering helper: nvme/mmcblk use a `p` before the index.
@@ -120,6 +141,7 @@ pub fn partition_disk(
             // (sgdisk --zap-all + wipefs --all above already cleaned the
             // disk; sfdisk itself creates the fresh GPT with the script.)
             write_stdin("sfdisk", &[&dev], &script)?;
+            settle_devs();
 
             proc::run("mkfs.fat", &["-F32", "-n", "EFI", &esp])?;
             proc::run("mkfs.ext4", &["-F", "-L", hostname, &root])?;
@@ -140,6 +162,7 @@ pub fn partition_disk(
                 None => "label: dos\n,,L,*\n".to_string(),
             };
             write_stdin("sfdisk", &[&dev], &script)?;
+            settle_devs();
             proc::run("mkfs.ext4", &["-F", "-L", hostname, &root])?;
             if let Some(sd) = &swap_dev {
                 proc::run("mkswap", &["-f", sd])?;
@@ -167,7 +190,7 @@ fn swap_size_mb(disk_bytes: u64) -> Option<u64> {
 fn write_stdin(cmd: &str, args: &[&str], input: &str) -> io::Result<()> {
     use std::io::Write;
     use std::process::{Command, Stdio};
-    let mut child = Command::new(cmd)
+    let mut child = Command::new(crate::proc::resolve_cmd(cmd))
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())

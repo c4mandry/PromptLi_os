@@ -198,23 +198,19 @@ fn write_keymap(root: &Path, keymap: &str) -> io::Result<()> {
         "XKBMODEL=\"pc105\"\nXKBLAYOUT=\"{keymap}\"\nXKBVARIANT=\"\"\nXKBOPTIONS=\"\"\n"
     );
     std::fs::write(root.join("etc/default/keyboard"), keyboard)?;
-    // Debian's tmpfiles rule (usr/lib/tmpfiles.d/debian.conf) re-symlinks
-    // /etc/vconsole.conf to /etc/default/keyboard on every boot (L+). An
-    // /etc/tmpfiles.d file with the SAME name shadows it entirely — keep
-    // Debian's other rules and replace the vconsole link with a keymap file.
-    std::fs::create_dir_all(root.join("etc/tmpfiles.d"))?;
-    std::fs::write(
-        root.join("etc/tmpfiles.d/debian.conf"),
-        format!(
-            "# promptLi: shadows Debian's debian.conf — keeps the console keymap\n\
-             # instead of re-symlinking /etc/vconsole.conf to default/keyboard.\n\
-             L /run/shm - - - - /dev/shm\n\
-             d /run/sendsigs.omit.d 0755 root root -\n\
-             d /run/lock 1777 root root -\n\
-             L+ /etc/mtab - - - - ../proc/self/mounts\n\
-             L+ /etc/default/locale - - - - ../locale.conf\n\
-             f /etc/vconsole.conf 0644 root root - KEYMAP={keymap}\\nFONT=Lat2-Terminus16\\n\n"
-        ),
+    // Regenerate console-setup's cached keymap so keyboard-setup.service
+    // loads THIS layout at boot — writing /etc/default/keyboard alone is not
+    // enough because /etc/console-setup/cached_*.kmap.gz still holds the
+    // live image's keymap (us), which would leave the console in dead-key
+    // garbage (<ffffffff> / colored backgrounds on keypress).
+    run(
+        "chroot",
+        &[
+            root.to_str().unwrap_or(""),
+            "/bin/sh",
+            "-c",
+            "command -v setupcon >/dev/null 2>&1 && DEBIAN_FRONTEND=noninteractive setupcon --force --save 2>/dev/null || true",
+        ],
     )?;
     Ok(())
 }

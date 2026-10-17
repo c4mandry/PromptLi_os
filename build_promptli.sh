@@ -710,31 +710,28 @@ cat > config/hooks/normal/9999-promptli-customize.hook.chroot << 'HOOK'
 #!/bin/bash
 echo "⚡ Customizing promptLi OS..."
 
-# ── Console keymap: a real vconsole.conf ──────────────────
-# Debian ships /etc/vconsole.conf as a symlink to /etc/default/keyboard,
-# and tmpfiles (usr/lib/tmpfiles.d/debian.conf, type L+) re-creates that
-# link on every boot. systemd-vconsole-setup cannot parse the XKB syntax,
-# so the console silently falls back to the US layout. Replace the link
-# with a real KEYMAP= file and override the tmpfiles rule.
-echo "  [*] Fixing /etc/vconsole.conf keymap..."
-if [ -L /etc/vconsole.conf ]; then
-    rm -f /etc/vconsole.conf
+# ── Console keymap: make console-setup own it ─────────────
+# On Debian, the *console* keymap is derived from /etc/default/keyboard via
+# console-setup (setupcon/ckbcomp), NOT from /etc/vconsole.conf. Setting
+# KEYMAP=et in vconsole.conf without the matching console-setup cache leaves
+# loadkeys with no usable keymap -> every keypress spits <ffffffff> (dead
+# keys / bad codepoints) and colored backgrounds. So: set the layout in
+# /etc/default/keyboard and regenerate the cached keymap so keyboard-setup
+# and console-setup load it at boot. vconsole.conf gets a real KEYMAP= too
+# for systemd-vconsole-setup (harmless and correct if present).
+echo "  [*] Setting console keymap (et) via console-setup..."
+mkdir -p /etc/default
+cat > /etc/default/keyboard << 'KB'
+XKBMODEL="pc105"
+XKBLAYOUT="et"
+XKBVARIANT=""
+XKBOPTIONS=""
+BACKSPACE="guess"
+KB
+# Regenerate the console keymap cache from the XKB layout above.
+if command -v setupcon >/dev/null 2>&1; then
+    DEBIAN_FRONTEND=noninteractive setupcon --force --save 2>/dev/null || true
 fi
-printf 'KEYMAP=et\nFONT=Lat2-Terminus16\n' > /etc/vconsole.conf
-mkdir -p /etc/tmpfiles.d
-# An /etc/tmpfiles.d file only shadows a /usr/lib one with the SAME name;
-# keep Debian's other rules and replace the vconsole symlink rule with a
-# keymap file, or tmpfiles would re-create the link on every boot.
-cat > /etc/tmpfiles.d/debian.conf << 'TC'
-# promptLi: shadows Debian's debian.conf — keeps the console keymap instead
-# of re-symlinking /etc/vconsole.conf to /etc/default/keyboard.
-L /run/shm - - - - /dev/shm
-d /run/sendsigs.omit.d 0755 root root -
-d /run/lock 1777 root root -
-L+ /etc/mtab - - - - ../proc/self/mounts
-L+ /etc/default/locale - - - - ../locale.conf
-f /etc/vconsole.conf 0644 root root - KEYMAP=et\nFONT=Lat2-Terminus16\n
-TC
 
 # ── AUR support: makedeb + mist (install AUR packages on Debian) ──
 # makedeb is vendored (vendor/makedeb/*.deb) so the build works offline;
@@ -815,6 +812,23 @@ DEBIAN_FRONTEND=noninteractive apt-get purge -y -qq \
 apt-get autoremove -y -qq 2>/dev/null || true
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
     dbus-broker systemd-resolved 2>/dev/null || true
+
+# ── Console keymap/font data must survive autoremove ────────
+# `kbd` (the kernel keymap files in /usr/share/keymaps/i386) and console-setup
+# fonts are sometimes marked auto and stripped by the autoremove above, which
+# leaves KEYMAP=et in /etc/vconsole.conf pointing at data that no longer
+# exists — the kernel then falls back to a broken default keymap and every
+# keypress prints <ffffffff> or colored garbage. Reinstall them explicitly
+# and mark them manually-installed so a later autoremove won't take them.
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+    kbd console-setup console-setup-linux keyboard-configuration 2>/dev/null || true
+apt-mark manual kbd console-setup console-setup-linux keyboard-configuration 2>/dev/null || true
+# Keep a real KEYMAP= in /etc/vconsole.conf too (harmless; systemd-vconsole-
+# setup loads it where present, and keyboard-setup uses the console-setup cache).
+if [ -L /etc/vconsole.conf ]; then
+    rm -f /etc/vconsole.conf
+fi
+printf 'KEYMAP=et\nFONT=Lat2-Terminus16\n' > /etc/vconsole.conf
 # dbus-broker does not ship a dbus.socket unit (the purged dbus package owned
 # it) and without it the broker can never be socket-activated — logins would
 # stall ~25s in pam_systemd. Ship our own socket unit and enable it.

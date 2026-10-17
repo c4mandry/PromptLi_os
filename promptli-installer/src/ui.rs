@@ -137,13 +137,22 @@ pub fn run(disks: Vec<Disk>) -> io::Result<Option<Config>> {
 
 fn init_terminal() -> io::Result<Term> {
     terminal::enable_raw_mode()?;
+    // Enter the alternate screen buffer so the installer's UI is isolated
+    // from whatever was on the terminal (fastfetch logo, MOTD, prompt).
     io::stdout().execute(EnterAlternateScreen)?;
+    // Some terminals seed the alt buffer with a copy of the main screen;
+    // ratatui only repaints regions it writes, so clear the whole screen
+    // first or the leftover login banner bleeds through the TUI.
+    io::stdout().execute(crossterm::terminal::Clear(crossterm::terminal::ClearType::All))?;
+    io::stdout().execute(crossterm::cursor::MoveTo(0, 0))?;
     Terminal::new(CrosstermBackend::new(io::stdout()))
 }
 
 fn cleanup_terminal(_t: &mut Term) -> io::Result<()> {
+    // Leave the alternate screen and disable raw mode in the right order so
+    // the terminal is restored cleanly regardless of how the installer exits.
+    let _ = io::stdout().execute(LeaveAlternateScreen);
     terminal::disable_raw_mode()?;
-    io::stdout().execute(LeaveAlternateScreen)?;
     Ok(())
 }
 
