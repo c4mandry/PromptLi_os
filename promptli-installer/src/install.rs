@@ -212,6 +212,24 @@ fn write_keymap(root: &Path, keymap: &str) -> io::Result<()> {
             "command -v setupcon >/dev/null 2>&1 && DEBIAN_FRONTEND=noninteractive setupcon --force --save 2>/dev/null || true",
         ],
     )?;
+    // Also stop Debian's tmpfiles rule (usr/lib/tmpfiles.d/debian.conf) from
+    // re-symlinking /etc/vconsole.conf to /etc/default/keyboard at boot; an
+    // /etc/tmpfiles.d file with the SAME name shadows it entirely. Keep
+    // Debian's other rules and keep vconsole.conf a real KEYMAP= file.
+    std::fs::create_dir_all(root.join("etc/tmpfiles.d"))?;
+    std::fs::write(
+        root.join("etc/tmpfiles.d/debian.conf"),
+        format!(
+            "# promptLi: shadows Debian's debian.conf — keeps the console keymap\n\
+             # instead of re-symlinking /etc/vconsole.conf to default/keyboard.\n\
+             L /run/shm - - - - /dev/shm\n\
+             d /run/sendsigs.omit.d 0755 root root -\n\
+             d /run/lock 1777 root root -\n\
+             L+ /etc/mtab - - - - ../proc/self/mounts\n\
+             L+ /etc/default/locale - - - - ../locale.conf\n\
+             f /etc/vconsole.conf 0644 root root - KEYMAP={keymap}\\nFONT=Lat2-Terminus16\\n\n"
+        ),
+    )?;
     Ok(())
 }
 

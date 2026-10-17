@@ -767,6 +767,18 @@ fi
 if command -v makedeb >/dev/null 2>&1; then echo "  [✓] makedeb installed"; else echo "  [!] makedeb install failed"; fi
 if command -v mist >/dev/null 2>&1; then echo "  [✓] mist installed (AUR ready)"; else echo "  [!] mist not available yet (repo offline; retried at first boot)"; fi
 
+# ── Fix makepkg.conf architecture for AUR builds ──────────
+# Debian's pacman-package-manager ships CARCH="$(uname -p)" — but Debian
+# kernels report "unknown" for uname -p (Arch's report x86_64), so makedeb
+# rejects every AUR PKGBUILD with arch=('x86_64'):
+#   "yay is not available for the 'amd64' architecture."
+# makepkg's canonical arch comes from uname -m; use that instead.
+if [ -f /etc/makepkg.conf ]; then
+    sed -i 's|CARCH="\$(uname -p)"|CARCH="$(uname -m)"|' /etc/makepkg.conf
+    sed -i 's|CHOST="\$(uname -p)-pc-linux-gnu"|CHOST="$(uname -m)-pc-linux-gnu"|' /etc/makepkg.conf
+    grep -q 'CARCH="\$(uname -m)"' /etc/makepkg.conf && echo "  [✓] makepkg.conf CARCH fixed (uname -m)" || echo "  [!] makepkg.conf CARCH patch did not apply"
+fi
+
 # ── Fast boot + low idle RAM tweaks ─────────────────────
 echo "  [*] Applying boot-speed + RAM tweaks..."
 # systemctl needs dbus, which doesn't exist inside a build chroot — masking
@@ -829,6 +841,20 @@ if [ -L /etc/vconsole.conf ]; then
     rm -f /etc/vconsole.conf
 fi
 printf 'KEYMAP=et\nFONT=Lat2-Terminus16\n' > /etc/vconsole.conf
+# Also stop Debian's tmpfiles rule (usr/lib/tmpfiles.d/debian.conf) from
+# re-symlinking /etc/vconsole.conf to /etc/default/keyboard at boot; an
+# /etc/tmpfiles.d file with the SAME name shadows it entirely.
+mkdir -p /etc/tmpfiles.d
+cat > /etc/tmpfiles.d/debian.conf << 'TC'
+# promptLi: shadows Debian's debian.conf — keeps the console keymap instead
+# of re-symlinking /etc/vconsole.conf to /etc/default/keyboard.
+L /run/shm - - - - /dev/shm
+d /run/sendsigs.omit.d 0755 root root -
+d /run/lock 1777 root root -
+L+ /etc/mtab - - - - ../proc/self/mounts
+L+ /etc/default/locale - - - - ../locale.conf
+f /etc/vconsole.conf 0644 root root - KEYMAP=et\nFONT=Lat2-Terminus16\n
+TC
 # dbus-broker does not ship a dbus.socket unit (the purged dbus package owned
 # it) and without it the broker can never be socket-activated — logins would
 # stall ~25s in pam_systemd. Ship our own socket unit and enable it.
