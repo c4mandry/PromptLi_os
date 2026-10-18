@@ -3,11 +3,12 @@
 
 Command-line interface for the AIDO agent.
 
-- ``aido``            → full-screen chat TUI (first run asks 2 questions)
+- ``aido``            → full-screen chat TUI
 - ``aido chat``       → same TUI (line REPL when stdin is not a terminal)
 - ``aido "question"`` → one-shot natural-language command
 - ``aido tools``      → list available tools
 - ``aido setup``      → download a local model + install the LLM backend
+- ``aido key``        → manage the encrypted remote API key (sudo)
 
 The GUI/tray/voice frontends were removed: promptLi OS is a headless,
 server-focused system, so AIDO lives in the terminal only.
@@ -210,12 +211,24 @@ def main(argv: list[str] | None = None) -> int:
         _print_tools()
         return 0
 
-    # Subcommands (no model needed for tools/setup).
+    # Subcommands (no model needed for tools/setup/key).
     if args.command:
         head = args.command[0]
         if head == "tools":
             _print_tools()
             return 0
+        if head == "key":
+            import secrets
+
+            op = args.command[1] if len(args.command) > 1 else "show"
+            if op in ("set", "add"):
+                return secrets.key_set()
+            if op in ("show", "get"):
+                return secrets.key_show()
+            if op in ("clear", "remove", "rm"):
+                return secrets.key_clear()
+            print("usage: aido key set|show|clear", file=sys.stderr)
+            return 1
         if head == "setup":
             return _run_setup()
         if head == "chat":

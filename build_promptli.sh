@@ -8,7 +8,7 @@ set -euo pipefail
 
 # Versioning: major is set by hand. Minor counts features/big changes since
 # v1.0.0 (see git history); patch counts every bug fix, however small.
-VERSION="1.23.3"
+VERSION="1.24.0"
 ISO_NAME="promptli-os-${VERSION}-amd64"
 
 echo "================================================"
@@ -616,19 +616,18 @@ X
 mkdir -p "$INCLUDES/etc/fastfetch" "$INCLUDES/etc/skel/.config/fastfetch"
 cat > "$INCLUDES/etc/fastfetch/config.jsonc" << 'X'
 // promptLi OS fastfetch config — custom logo + clean output.
-// Monochrome logo: fastfetch 2.40 defaults a `data` logo to the fallback
-// (unknown) OS logo's colors, so we pin color 1 to the terminal default and
-// disable bold (brightColor) — the art renders in plain foreground color.
+// Pure-ASCII logo: block characters (█▓▒░) render on EVERY terminal including
+// the plain Linux console, where the old braille glyphs showed as empty boxes.
 {
     "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
     "logo": {
         "type": "data",
-        "source": "⠀⠀⠀⠀⠀⢀⣠⣤⣶⣶⣿⣿⣿⣶⣶⣤⡀⠀⠀⠀⠀\n⠀⠀⠀⠀⣴⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣦⡀⠀⠀\n⠀⠀⠀⣼⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣧⠀⠀\n⠀⠀⢠⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡄⠀\n⠀⠀⢸⣿⣿⣿⣿⣿⡏⢸⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇⠀\n⠀⠀⠘⣿⣿⣟⡿⢿⣷⢸⠞⠛⢽⣾⣛⡟⣿⣿⣿⠁⠀\n⠀⠀⠀⠻⣿⡟⢶⡿⡿⠀⠀⠀⠀⠹⠯⠏⢸⣿⣿⠀⠀\n⠀⠀⠀⠀⠛⣾⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣼⣿⡏⠀⠀\n⠀⠀⠀⠀⠀⣿⣿⣄⠀⠀⠈⠍⠀⠀⢀⣼⣿⣿⡇⠀⠀\n⠀⠀⠀⠀⠀⠈⠀⠘⢉⠖⠠⠤⠤⠀⠈⡌⣿⡏⠀⠀⠀\n⠀⠀⠀⠀⠀⢀⡠⠔⠊⠀⠀⠀⠀⠀⠀⠈⣿⡀⠀⠀⠀\n⠀⡠⠂⠉⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣿⠈⠁⠂⢄\n⢰⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠘⣆⠀⠀⠈",
+        "source": "           ██     ██   \n          ████   ████  \n         ██████ ██████  \n        ████████████████ \n        ██████  ████████ \n        █████   ████████  \n         ████    ██████   \n          ██      ████    \n                    ███    \n                    ███    \n                    ███    \n                    ███    \n                    ██     ",
         "padding": { "left": 2 },
         "color": { "1": "default" }
     },
     "display": {
-        "separator": " ➜ ",
+        "separator": " -> ",
         "brightColor": false
     },
     "modules": [

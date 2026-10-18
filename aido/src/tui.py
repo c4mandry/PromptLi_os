@@ -2,14 +2,13 @@
 """AIDO TUI — full-screen terminal chat interface (curses, stdlib only).
 
 Runs the AIDO agent in a worker thread and renders a chat UI with streaming
-replies, tool-call notifications, destructive-action confirmation, and a
-first-run setup wizard that writes ~/.aido/aido.yaml — no manual config
-editing needed.
+replies, tool-call notifications, and destructive-action confirmation, all
+with sensible defaults — no first-run setup questions and no manual config.
 
 Design notes
 ------------
-* curses runs in the main thread; the agent (llama-cpp) runs in a worker
-  thread and communicates through two queues: events (tokens/results) and
+* curses runs in the main thread; the agent runs in a worker thread and
+  communicates through two queues: events (tokens/results) and
   confirm_results (the user's y/n answer to a risky tool call).
 * The confirmation callback blocks the worker thread until the user answers,
   which keeps tool execution synchronous while the UI stays responsive.
@@ -60,74 +59,18 @@ def _attr(color: int, bold: bool = False) -> int:
 
 
 # ── first-run setup wizard ───────────────────────────────────────────────
-
-
-def _ask_line(stdscr, row: int, prompt: str, default: str) -> str:
-    """Inline single-line input with a default. Enter = accept, Esc = default."""
-    stdscr.move(row, 1)
-    stdscr.clrtoeol()
-    stdscr.addstr(row, 1, f"{prompt} [{default}]", _attr(_C_HEADER))
-    stdscr.refresh()
-    buf = ""
-    while True:
-        stdscr.move(row, 1 + len(prompt) + 2 + len(default) + 1 + len(buf) + 1)
-        stdscr.refresh()
-        try:
-            ch = stdscr.get_wch()
-        except curses.error:
-            continue
-        if isinstance(ch, str):
-            if ch == "\n":
-                return buf.strip() or default
-            if ch == "\x1b":
-                return default
-            if ch in ("\x7f", "\x08"):
-                buf = buf[:-1]
-                stdscr.move(row, 1)
-                stdscr.clrtoeol()
-                stdscr.addstr(row, 1, f"{prompt} [{default}] {buf}", _attr(_C_HEADER))
-            elif ch.isprintable() and len(buf) < 120:
-                buf += ch
-                stdscr.addstr(ch, _attr(_C_HEADER) | curses.A_BOLD)
-
-
-def _wizard(stdscr, user_path: Path) -> None:
-    """Ask the minimum questions and write the user config file."""
-    _init_colors()
-    h, w = stdscr.getmaxyx()
-    stdscr.erase()
-    title = " AIDO — first run setup "
-    stdscr.addstr(max(0, h // 2 - 4), max(0, w // 2 - len(title) // 2), title, _attr(_C_HEADER) | curses.A_BOLD)
-    row = max(0, h // 2 - 2)
-    stdscr.addstr(row, 1, "One-time setup — this writes ~/.aido/aido.yaml so you", _attr(_C_SYS))
-    stdscr.addstr(row + 1, 1, "never have to edit config files by hand.", _attr(_C_SYS))
-    row += 3
-    model = _ask_line(stdscr, row, "Local model (.gguf path)", "~/.aido/models/granite.gguf")
-    row += 1
-    confirm = _ask_line(stdscr, row, "Ask before risky actions? [Y/n]", "y")
-    user_path.parent.mkdir(parents=True, exist_ok=True)
-    import yaml
-
-    data = {
-        "model": {"path": model},
-        "safety": {"confirm_destructive": confirm.strip().lower() not in ("n", "no")},
-    }
-    user_path.write_text(yaml.safe_dump(data, sort_keys=False))
-    stdscr.move(row + 2, 1)
-    stdscr.clrtoeol()
-    stdscr.addstr(row + 2, 1, f"✓ Saved {user_path}", _attr(_C_AIDO))
-    stdscr.refresh()
-    time.sleep(0.8)
+# Removed: AIDO is config-free out of the box. The wizard was the only
+# thing the user had to "configure by hand" and it's now gone; defaults
+# are used automatically. (A ~/.aido/aido.yaml may still override them.)
 
 
 def ensure_config(explicit: str | None = None) -> dict:
-    """Merged config; runs the first-run wizard when the user config is missing."""
-    config = utils.load_config(explicit)
-    if explicit or USER_CONFIG_PATH.is_file():
-        return config
-    if not (hasattr(sys, "stdin") and sys.stdin.isatty()):
-        return config  # headless: rely on defaults, don't block
-    curses.wrapper(_wizard, USER_CONFIG_PATH)
+    """Merged config using built-in defaults — no interactive wizard.
+
+    AIDO works out of the box with sane defaults; the user never needs to
+    answer setup questions or hand-edit a YAML file. If they want to change
+    a default, they can still drop a ~/.aido/aido.yaml in place.
+    """
     return utils.load_config(explicit)
 
 
@@ -147,7 +90,7 @@ class ChatTui:
         self.hist_idx = 0
         self.scroll = 0
         self.busy = False
-        self.status = "Say hello! /help for commands"
+        self.status = "Type a request, or /help for commands"
         self.confirming: dict | None = None
         self.quit = False
         self.exit_code = 0
@@ -196,9 +139,14 @@ class ChatTui:
             self.messages.append({
                 "role": "sys",
                 "text": (
-                    "/help  this list   /clear  forget history   /tools  list tools\n"
-                    "/model  show model   /exit  quit\n"
-                    "Press Ctrl+C twice or Ctrl+D to quit. Arrow keys scroll the log."
+                    "Just type what you want AIDO to do, in plain language.\n"
+                    "Examples: \"list my Downloads\", \"show memory usage\", \"install htop\".\n"
+                    "\n"
+                    "/help   this help        /clear   forget the conversation\n"
+                    "/tools  list what AIDO can do   /model  which model + API key status\n"
+                    "/exit   quit\n"
+                    "\n"
+                    "Up/Down arrow = scroll, Enter = send. Ctrl+C twice or Ctrl+D = quit."
                 ),
             })
         elif name == "clear":
@@ -215,7 +163,17 @@ class ChatTui:
             self.messages.append({"role": "sys", "text": "\n".join(lines)})
         elif name == "model":
             path = self.config.get("model", {}).get("path", "?")
-            self.messages.append({"role": "sys", "text": f"model: {path}"})
+            from pathlib import Path
+
+            key_status = "not set"
+            try:
+                from secrets import SECRET_PATH
+
+                if SECRET_PATH.is_file():
+                    key_status = "set (encrypted)"
+            except Exception:
+                pass
+            self.messages.append({"role": "sys", "text": f"model: {path}\nAPI key: {key_status}"})
         elif name == "exit":
             self.quit = True
         else:

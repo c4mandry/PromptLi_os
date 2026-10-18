@@ -52,6 +52,21 @@ fn run_update(args: &[String]) -> i32 {
 }
 
 fn run_installer(args: &[String]) -> i32 {
+    // The installer parts disks and formats filesystems, so it MUST run as
+    // root. Fail early with a clear message instead of a cryptic
+    // "sfdisk: cannot open /dev/...: permission denied" from deep in a run.
+    // (No SUID/drop: just a friendly guard — run it with `sudo`.)
+    let euid = std::process::Command::new("id")
+        .arg("-u")
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().parse::<u32>().unwrap_or(0))
+        .unwrap_or(0);
+    if euid != 0 {
+        eprintln!("error: promptli-install needs root (it partitions disks).");
+        eprintln!("       Re-run with:  sudo promptli-install{}", if args.is_empty() { "" } else { " <your options>" });
+        return 1;
+    }
+
     let mut cfg = Config::default();
     let mut disk_flag: Option<String> = None;
 
