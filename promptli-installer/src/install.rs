@@ -192,7 +192,7 @@ fn write_keymap(root: &Path, keymap: &str) -> io::Result<()> {
     }
     std::fs::write(
         &vconsole,
-        format!("KEYMAP={keymap}\nFONT=Lat2-Terminus16\n"),
+        format!("KEYMAP={keymap}\nFONT=Uni2-Terminus16\n"),
     )?;
     let keyboard = format!(
         "XKBMODEL=\"pc105\"\nXKBLAYOUT=\"{keymap}\"\nXKBVARIANT=\"\"\nXKBOPTIONS=\"\"\n"

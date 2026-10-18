@@ -8,7 +8,7 @@ set -euo pipefail
 
 # Versioning: major is set by hand. Minor counts features/big changes since
 # v1.0.0 (see git history); patch counts every bug fix, however small.
-VERSION="1.23.0"
+VERSION="1.23.1"
 ISO_NAME="promptli-os-${VERSION}-amd64"
 
 echo "================================================"
@@ -154,8 +154,10 @@ kbd console-setup
 # wpa_supplicant + iw stay for WiFi
 wpasupplicant iw iproute2
 
-# Modern framebuffer console: fbterm (Unicode fonts, images) + Noto mono
-fbterm fonts-noto-mono
+# Modern framebuffer console packages are NOT shipped: fbterm's keyboard
+# input is broken on modern kernels. The plain console runs in UTF-8 mode
+# with a Unicode font (console-setup + kbd) — reliable and bloat-free.
+# fbterm fonts-noto-mono
 
 # Disk / provisioning (used by the Rust installer; sfdisk ships in util-linux)
 parted fdisk util-linux dosfstools
@@ -276,7 +278,7 @@ apt-mark manual pacman-package-manager makedeb makedeb-beta mist build-essential
 apt-get purge -y -qq \
     zsh zsh-common zsh-autosuggestions zsh-syntax-highlighting \
     fzf eza bat ripgrep fd-find zoxide btop tmux \
-    fbterm fonts-noto-mono fonts-dejavu-core fonts-dejavu-mono \
+    fonts-dejavu-core fonts-dejavu-mono \
     python3 python3-minimal python3-pip python3-venv python3-yaml python3-requests \
     man-db manpages unzip p7zip-full htop 2>/dev/null || true
 apt-get autoremove -y --purge -qq 2>/dev/null || true
@@ -285,7 +287,7 @@ apt-get clean -qq 2>/dev/null || true
 # 2. Remove the AI assistant + python-based extras.
 rm -rf /opt/aido /opt/promptli/tools /opt/promptli/promptli-wallpaper.py
 rm -f /usr/local/bin/aido /usr/local/bin/promptli /usr/local/bin/locakhost /usr/local/bin/promptli-term
-rm -f /etc/skel/.fbtermrc /root/.fbtermrc
+rm -f /etc/skel/.fbtermrc /root/.fbtermrc 2>/dev/null
 
 # 3. zsh → bash. Use usermod (NOT chsh): once zsh is purged it vanishes
 #    from /etc/shells while root's shell is still zsh, which makes PAM's
@@ -319,7 +321,7 @@ done
 touch /etc/promptli/fast
 
 echo ""
-echo "✅ FAST mode active — aido, zsh, python tools, fbterm, docs removed;"
+echo "✅ FAST mode active — aido, zsh, python tools, docs removed;"
 echo "   pacman/AUR kept; systemd services masked; one plain getty."
 echo "   Reboot for full effect. Restore with: promptli-norm"
 X
@@ -345,7 +347,7 @@ apt-get update -qq
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
     zsh zsh-common zsh-autosuggestions zsh-syntax-highlighting \
     fzf eza bat ripgrep fd-find zoxide btop tmux \
-    fbterm fonts-noto-mono fonts-dejavu-core fonts-dejavu-mono \
+    fonts-dejavu-core fonts-dejavu-mono \
     python3 python3-pip python3-venv python3-yaml python3-requests \
     man-db manpages unzip p7zip-full htop 2>/dev/null || true
 
@@ -366,17 +368,14 @@ if [ -z "$SQS" ]; then
 fi
 if [ -n "$SQS" ]; then
     unsquashfs -f -no-progress -d / "$SQS" \
-        opt/aido opt/promptli/tools opt/promptli/promptli-wallpaper.py \
+        opt/aido opt/promptli/tools \
         usr/local/bin/aido usr/local/bin/locakhost usr/local/bin/promptli \
-        usr/local/bin/promptli-term etc/skel/.fbtermrc 2>/dev/null || true
+        usr/local/bin/promptli-term 2>/dev/null || true
     chmod +x /usr/local/bin/aido /usr/local/bin/locakhost \
         /usr/local/bin/promptli /usr/local/bin/promptli-term 2>/dev/null || true
 fi
 umount /var/tmp/pl-iso-mnt 2>/dev/null || true
 rm -rf /var/tmp/pl-iso-mnt /var/tmp/promptli-restore.iso
-if [ ! -f /root/.fbtermrc ]; then
-    printf 'font-names=DejaVu Sans Mono\nfont-size=14\ntext-encodings=UTF-8\n' > /root/.fbtermrc
-fi
 
 # 3. bash → zsh (usermod, same PAM-proof approach as promptli-fast).
 usermod -s /usr/bin/zsh promptli 2>/dev/null || true
@@ -726,9 +725,8 @@ ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=8'
 
 # ── Normal console look ──────────────────────────────────
 # promptLi OS logs you into the plain Linux console (perfect character
-# spacing, the look every Linux user knows). fbterm is still available as
-# an OPT-IN fancy terminal — run `promptli-term` if you want Unicode fonts
-# and a wallpaper background.
+# spacing, the look every Linux user knows). promptli-term switches the
+# console to UTF-8 + a Unicode font for the logo and Unicode text.
 
 # ── promptLi autostart (sourced once per login shell) ────
 # Drop executable scripts in /etc/promptli/autostart.d/ (system-wide) or
@@ -750,84 +748,25 @@ fi
 X
 cp "$INCLUDES/etc/zsh/zshrc" "$INCLUDES/etc/skel/.zshrc"
 
-# ── fbterm config + launcher + framebuffer wallpaper ─────
-# fbterm is OPT-IN (`promptli-term`): the default login uses the plain
-# Linux console. DejaVu Sans Mono at 14px has uniform advance widths, which
-# avoids the uneven letter spacing that other fonts produce in fbterm.
-mkdir -p "$INCLUDES/usr/share/promptli"
-cat > "$INCLUDES/etc/skel/.fbtermrc" << 'X'
-# promptLi OS fbterm config (used only when running promptli-term).
-font-names=DejaVu Sans Mono
-font-size=14
-text-encodings=UTF-8
-X
+# ── promptli-term: plain-console enhancer ────────────────
+# fbterm is NOT used anywhere: its keyboard input is broken on modern
+# kernels. promptli-term switches the console to UTF-8 + a Unicode font.
 cat > "$INCLUDES/usr/local/bin/promptli-term" << 'X'; chmod +x "$INCLUDES/usr/local/bin/promptli-term"
 #!/bin/sh
-# promptLi OS — modern framebuffer terminal launcher.
-# Draws a Tokyo Night gradient wallpaper straight into /dev/fb0, then runs
-# fbterm on top of it (Unicode fonts + the screenshot as background).
-if [ -n "$FBTERM_BACKGROUND_IMAGE" ]; then
-    exec fbterm
+# promptLi OS — console enhancer: UTF-8 mode + a Unicode-capable font on the
+# plain Linux console, so the logo and Unicode render properly. fbterm is
+# deliberately NOT used: its keyboard input is broken on modern kernels.
+if [ "$(id -u)" != 0 ]; then
+    exec sudo -E "$0" "$@"
 fi
-python3 /opt/promptli/promptli-wallpaper.py >/dev/null 2>&1
-sleep 0.2
-FBTERM_BACKGROUND_IMAGE=1 exec fbterm
-X
-cat > "$INCLUDES/opt/promptli/promptli-wallpaper.py" << 'X'
-#!/usr/bin/env python3
-"""Draw a Tokyo Night gradient directly into the Linux framebuffer.
-No dependencies: writes raw pixels to /dev/fb0 (32-bit framebuffers)."""
-import mmap, os, sys
-
-FB = "/dev/fb0"
-SYS = "/sys/class/graphics/fb0"
-
-TOP = (0x1a, 0x1b, 0x26)     # Tokyo Night bg
-BOTTOM = (0x0f, 0x0f, 0x15)  # darker floor
-ACCENT = (0xbb, 0x9a, 0xf7)   # purple band
-
-def main():
-    if not os.path.exists(FB):
-        sys.exit(0)
-    try:
-        with open(f"{SYS}/bits_per_pixel") as f:
-            bpp = int(f.read().strip())
-        with open(f"{SYS}/virtual_size") as f:
-            w, h = map(int, f.read().strip().split(","))
-    except Exception:
-        sys.exit(0)
-    if bpp not in (32, 24):
-        sys.exit(0)
-    bytespp = bpp // 8
-    fd = os.open(FB, os.O_RDWR)
-    size = w * h * bytespp
-    mm = mmap.mmap(fd, size, mmap.MAP_SHARED, mmap.PROT_WRITE)
-    buf = bytearray(w * bytespp)
-    for y in range(h):
-        t = y / max(h - 1, 1)
-        r = int(TOP[0] + (BOTTOM[0] - TOP[0]) * t)
-        g = int(TOP[1] + (BOTTOM[1] - TOP[1]) * t)
-        b = int(TOP[2] + (BOTTOM[2] - TOP[2]) * t)
-        # Subtle purple band near the vertical center.
-        d = abs(y - h * 0.42) / (h * 0.08 + 1)
-        if d < 1:
-            k = (1 - d) * 0.35
-            r = int(r + (ACCENT[0] - r) * k)
-            g = int(g + (ACCENT[1] - g) * k)
-            b = int(b + (ACCENT[2] - b) * k)
-        off = y * w * bytespp
-        for x in range(w):
-            buf[x * bytespp] = b          # framebuffer is typically BGRA
-            buf[x * bytespp + 1] = g
-            buf[x * bytespp + 2] = r
-            buf[x * bytespp + 3] = 255
-        mm[off:off + len(buf)] = buf
-    mm.flush()
-    mm.close()
-    os.close(fd)
-
-if __name__ == "__main__":
-    main()
+printf '\033%%G' > /dev/tty0 2>/dev/null || true
+if command -v setupcon >/dev/null 2>&1; then
+    setupcon --save 2>/dev/null || true
+else
+    setfont /usr/share/consolefonts/Uni2-Terminus16.psf.gz 2>/dev/null || \
+    setfont /usr/share/consolefonts/Uni3-TerminusBold16.psf.gz 2>/dev/null || true
+fi
+echo "Console: UTF-8 mode, Unicode font active."
 X
 
 # ── Autostart config system ──────────────────────────────
@@ -849,11 +788,10 @@ if ! id promptli >/dev/null 2>&1; then
     useradd -m -s /usr/bin/zsh -G sudo,netdev,video promptli
     echo "promptli:promptli" | chpasswd
 fi
-# Always sync /etc/skel into the user + root homes (fbtermrc, zshrc, ...)
+# Always sync /etc/skel into the user + root homes (zshrc, ...)
 # in case the live overlay or a pre-existing home is missing them.
 cp -r /etc/skel/. /home/promptli/ 2>/dev/null || true
 chown -R promptli:promptli /home/promptli 2>/dev/null || true
-cp -f /etc/skel/.fbtermrc /root/.fbtermrc 2>/dev/null || true
 cp -f /etc/skel/.zshrc /root/.zshrc 2>/dev/null || true
 chsh -s /usr/bin/zsh root 2>/dev/null || true
 # aido's light deps (PyYAML, requests) come from Debian packages; no pip
@@ -1138,42 +1076,27 @@ rm -f /lib/systemd/system-generators/live-config-getty-generator
 mkdir -p /etc/systemd/system/serial-getty@.service.d
 printf '[Service]\nEnvironment=TERM=linux\n' > /etc/systemd/system/serial-getty@.service.d/term.conf
 
-# ── tty1: Unicode framebuffer console (fbterm) ────────────
-# The main console runs fbterm when a framebuffer exists, so the promptLi
-# logo (braille block glyphs) and Unicode render properly on the screen you
-# log into. Falls back to the plain Linux console on headless/serial
-# machines and VMs without a framebuffer; tty2+/ttyS0 stay plain getty.
-echo "  [*] tty1 -> fbterm (Unicode console)..."
+# ── tty1: reliable plain-console login ──────────────────
+# tty1 always logs in via the plain Linux console. fbterm's keyboard input
+# is broken on modern kernels (keystrokes scramble into wrong Unicode), so
+# it must never sit in front of the login prompt. The console runs in UTF-8
+# mode with a Unicode-capable font so the promptLi logo renders correctly.
+echo "  [*] tty1 -> plain console (UTF-8, unicode font)..."
+cat > /usr/local/bin/promptli-getty << 'GTY'
+#!/bin/sh
+# promptLi tty1 launcher: plain agetty. A login prompt must ALWAYS work,
+# so no fancy framebuffer terminal sits in front of it. (fbterm input is
+# broken on modern kernels — use the plain console instead.)
+TTY="${1:-tty1}"
+exec /sbin/agetty --noclear --login-program /bin/login "$TTY" 115200 linux
+GTY
+chmod +x /usr/local/bin/promptli-getty
 mkdir -p /etc/systemd/system/getty@tty1.service.d
 cat > /etc/systemd/system/getty@tty1.service.d/promptli-fbterm.conf << 'DROP'
 [Service]
 ExecStart=
 ExecStart=-/usr/local/bin/promptli-getty %I
 DROP
-cat > /usr/local/bin/promptli-getty << 'GTY'
-#!/bin/sh
-# promptLi tty1 launcher: fbterm (Unicode/braille-capable console) when a
-# framebuffer exists AND fbterm actually starts. If fbterm fails (some GPUs
-# / DRM framebuffers it cannot handle), fall back to the plain Linux console
-# so a login prompt is ALWAYS available — a broken tty1 must never lock the
-# user out. The failure is remembered for this boot via a stamp file.
-# NOTE: getty@tty1 passes %I = "tty1" (WITH the prefix), so use it as-is.
-TTY="${1:-tty1}"
-STAMP=/run/promptli-no-fbterm
-if [ -e /dev/fb0 ] && command -v fbterm >/dev/null 2>&1 && [ ! -e "$STAMP" ]; then
-    if fbterm -s 14 -- /bin/login -p; then
-        exit 0
-    fi
-    : > "$STAMP" 2>/dev/null || true
-fi
-exec /sbin/agetty --noclear --login-program /bin/login "$TTY" 115200 linux
-GTY
-chmod +x /usr/local/bin/promptli-getty
-cat > /root/.fbtermrc << 'RC'
-font-names=DejaVu Sans Mono
-font-size=14
-text-encodings=UTF-8
-RC
 
 # ── Default user: created at build time (not first boot) ──
 echo "  [*] Creating default user 'promptli'..."
@@ -1192,7 +1115,6 @@ chmod +x /usr/local/bin/promptli /usr/local/bin/locakhost /usr/local/bin/aido
 chmod +x /usr/local/bin/pacman /usr/local/bin/promptli-term
 chmod +x /usr/local/bin/promptli-fast /usr/local/bin/promptli-norm
 chmod +x /opt/promptli/setup.sh
-chmod +x /opt/promptli/promptli-wallpaper.py
 chmod +x /opt/aido/src/aido.py
 echo "✅ Done."
 HOOK
