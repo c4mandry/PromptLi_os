@@ -1159,7 +1159,7 @@ if [ -f "$ISO_PATH" ]; then
     "Minimal, bloat-free base — no window manager, no desktop environment",
     "aido — private, offline local AI assistant (terminal-first)",
     "pacman works: Debian packages via apt, AUR packages built with makedeb",
-    "Plain Linux console by default; fbterm opt-in via promptli-term",
+    "Plain Linux console with a Unicode font (promptli-term enhances it)",
     "zsh with autosuggestions, syntax highlighting, and a git-aware prompt",
     "systemd-networkd + resolved networking (no NetworkManager bloat)",
     "Custom fastfetch identity with the promptLi OS logo",
