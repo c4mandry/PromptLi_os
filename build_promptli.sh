@@ -8,7 +8,7 @@ set -euo pipefail
 
 # Versioning: major is set by hand. Minor counts features/big changes since
 # v1.0.0 (see git history); patch counts every bug fix, however small.
-VERSION="1.22.52"
+VERSION="1.23.0"
 ISO_NAME="promptli-os-${VERSION}-amd64"
 
 echo "================================================"
@@ -599,6 +599,15 @@ X
 # Export the version for the Rust installer/updater (reads PROMPTLI_VERSION).
 mkdir -p "$INCLUDES/etc/profile.d"
 printf 'export PROMPTLI_VERSION=%s\n' "$VERSION" > "$INCLUDES/etc/profile.d/promptli-version.sh"
+# Admin tools on the PATH for every shell (bash included in FAST mode),
+# Arch-style: /usr/sbin and friends are part of the normal user PATH.
+cat > "$INCLUDES/etc/profile.d/promptli-path.sh" << 'X'
+case ":$PATH:" in
+    *:/usr/local/sbin:*) ;;
+    *) PATH="/usr/local/sbin:/usr/sbin:/sbin:$PATH" ;;
+esac
+export PATH
+X
 cat > "$INCLUDES/etc/issue" << 'X'
 \S{PRETTY_NAME} \n \l
 
@@ -647,6 +656,15 @@ mkdir -p "$INCLUDES/etc/zsh" "$INCLUDES/etc/skel"
 cat > "$INCLUDES/etc/zsh/zshrc" << 'X'
 # promptLi OS — system-wide zsh configuration.
 # Works on 8-color and 256-color terminals alike (no truecolor required).
+
+# ── PATH ──────────────────────────────────────────────────
+# promptLi is server-focused: make admin tools (swapon, fdisk, ip, …)
+# reachable without typing the full /usr/sbin path, Arch-style.
+# (Guarded: /etc/profile.d/promptli-path.sh may already have added them.)
+case ":$PATH:" in
+    *:/usr/local/sbin:*) ;;
+    *) path=(/usr/local/sbin /usr/sbin /sbin $path) ;;
+esac
 
 # ── History ──────────────────────────────────────────────
 HISTFILE=~/.zsh_history
