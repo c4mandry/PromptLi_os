@@ -41,8 +41,8 @@ impl Default for Config {
             username: "promptli".to_string(),
             password: "promptli".to_string(),
             root_password: String::new(),
-            keymap: "et".to_string(),
-            timezone: "Europe/Tallinn".to_string(),
+            keymap: "us".to_string(),
+            timezone: "UTC".to_string(),
             site_url: crate::common::DEFAULT_SITE_URL.to_string(),
             installed: false,
         }

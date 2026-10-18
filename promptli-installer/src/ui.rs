@@ -91,7 +91,7 @@ static MENU: &[MenuItem] = &[
 
 /// Common keymap presets (Console keymap names, e.g. /usr/share/keymaps).
 const KEYMAP_PRESETS: &[&str] = &[
-    "et", "us", "fi", "de", "gb", "se", "no", "dk", "fr", "es", "it", "pl", "ru", "lv", "lt",
+    "us", "et", "fi", "de", "gb", "se", "no", "dk", "fr", "es", "it", "pl", "ru", "lv", "lt",
 ];
 
 /// Common timezone presets. "custom…" opens the free-text editor.

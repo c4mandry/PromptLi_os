@@ -230,8 +230,8 @@ OPTIONS:\n\
   --user <user>        Username  (default: promptli)\n\
   --password <pass>    User password (default: promptli)\n\
   --root-password <p>  Root password (default: root login disabled)\n\
-  --keymap <layout>    Console keymap: et, us, fi, de, … (default: et)\n\
-  --timezone <tz>      e.g. Europe/Tallinn (default: Europe/Tallinn)\n\
+  --keymap <layout>    Console keymap: et, us, fi, de, … (default: us)\n\
+  --timezone <tz>      e.g. Europe/Tallinn (default: UTC)\n\
   --site <url>         Enrollment server (default: https://webnotes.work)\n\
   --swap | --no-swap   Create a swap partition (default: swap on)\n\
   --efi | --bios       Partition layout (default: efi)\n\
