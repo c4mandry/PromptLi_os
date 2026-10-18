@@ -8,7 +8,7 @@ set -euo pipefail
 
 # Versioning: major is set by hand. Minor counts features/big changes since
 # v1.0.0 (see git history); patch counts every bug fix, however small.
-VERSION="1.21.47"
+VERSION="1.22.52"
 ISO_NAME="promptli-os-${VERSION}-amd64"
 
 echo "================================================"
@@ -163,7 +163,7 @@ squashfs-tools gdisk cryptsetup
 
 # Bootloader (installed to disk by the installer; grub-pc-bin avoids the
 # interactive device prompt that grub-pc's postinst would trigger in-chroot)
-grub-pc-bin grub-efi-amd64 grub-efi-amd64-bin os-prober
+grub-pc-bin grub-efi-amd64 grub-efi-amd64-bin efibootmgr os-prober
 
 # Arch-style package tooling: pacman binary + (AUR via makedeb/mist, added
 # from the vendored .deb in a chroot hook; gnupg is needed for its keyring).
@@ -242,6 +242,183 @@ X
 cat > "$INCLUDES/usr/local/bin/locakhost" << 'X'; chmod +x "$INCLUDES/usr/local/bin/locakhost"
 #!/bin/sh
 exec python3 /opt/promptli/tools/locakhost.py "$@"
+X
+
+# ── promptli-fast / promptli-norm: bloat mode switch ──────
+# FAST mode strips almost everything non-essential (aido, python tools, zsh,
+# fbterm, docs, extra packages) but ALWAYS keeps AUR support (pacman/makedeb/
+# mist), the installer/updater, and networking. zsh is replaced with bash;
+# systemd stays as PID1 (removing it wholesale would break login/network),
+# but its optional timers/services are masked for a faster, lighter boot.
+# NORM mode restores everything — packages from the internet, aido + tools
+# from the live ISO or a fresh ISO download from the website.
+cat > "$INCLUDES/usr/local/bin/promptli-fast" << 'X'; chmod +x "$INCLUDES/usr/local/bin/promptli-fast"
+#!/bin/sh
+# promptLi OS — FAST mode: remove almost everything non-essential.
+# Keeps: kernel, bootloader, pacman/AUR (makedeb, mist), installer/updater,
+# networking, fastfetch. Replaces zsh with bash.
+set -eu
+[ "$(id -u)" = 0 ] || exec sudo -E "$0" "$@"
+
+if [ -e /etc/promptli/fast ]; then
+    echo "Already in FAST mode. Restore with: promptli-norm"
+    exit 0
+fi
+
+echo "promptLi OS → FAST mode (removing aido, zsh, python tools, docs ...)"
+
+# AUR support + installer must never be removed by the purge/autoremove.
+apt-mark manual pacman-package-manager makedeb makedeb-beta mist build-essential gnupg \
+    fakeroot file gettext gawk libarchive-tools lsb-release zstd \
+    squashfs-tools rsync curl 2>/dev/null || true
+
+# 1. Purge heavy/optional packages.
+apt-get purge -y -qq \
+    zsh zsh-common zsh-autosuggestions zsh-syntax-highlighting \
+    fzf eza bat ripgrep fd-find zoxide btop tmux \
+    fbterm fonts-noto-mono fonts-dejavu-core fonts-dejavu-mono \
+    python3 python3-minimal python3-pip python3-venv python3-yaml python3-requests \
+    man-db manpages unzip p7zip-full htop 2>/dev/null || true
+apt-get autoremove -y --purge -qq 2>/dev/null || true
+apt-get clean -qq 2>/dev/null || true
+
+# 2. Remove the AI assistant + python-based extras.
+rm -rf /opt/aido /opt/promptli/tools /opt/promptli/promptli-wallpaper.py
+rm -f /usr/local/bin/aido /usr/local/bin/promptli /usr/local/bin/locakhost /usr/local/bin/promptli-term
+rm -f /etc/skel/.fbtermrc /root/.fbtermrc
+
+# 3. zsh → bash. Use usermod (NOT chsh): once zsh is purged it vanishes
+#    from /etc/shells while root's shell is still zsh, which makes PAM's
+#    pam_shells reject chsh with "Authentication failure". usermod edits
+#    /etc/passwd directly and never touches PAM.
+usermod -s /bin/bash promptli 2>/dev/null || true
+usermod -s /bin/bash root 2>/dev/null || true
+sed -i 's|^SHELL=.*|SHELL=/bin/bash|' /etc/default/useradd 2>/dev/null || true
+
+# 4. Mask optional systemd units (faster boot, less idle RAM).
+for unit in apt-daily.timer apt-daily-upgrade.timer man-db.timer \
+            systemd-tmpfiles-clean.timer e2scrub_all.timer e2scrub_reap.service \
+            fstrim.timer wpa_supplicant.service ModemManager.service; do
+    ln -sf /dev/null "/etc/systemd/system/$unit"
+done
+# One getty only (tty1), no fbterm — plain console login.
+mkdir -p /etc/systemd/logind.conf.d
+printf '[Login]\nNAutoVTs=1\n' > /etc/systemd/logind.conf.d/promptli.conf
+rm -rf /etc/systemd/system/getty@tty1.service.d
+# Tighter journald caps.
+mkdir -p /etc/systemd/journald.conf.d
+printf '[Journal]\nRuntimeMaxUse=4M\nRuntimeMaxFileSize=2M\nSystemMaxUse=16M\n' > /etc/systemd/journald.conf.d/promptli.conf
+
+# 5. Record the mode so fastfetch shows it (via os-release PRETTY_NAME).
+# Idempotent, and repairs any previously-broken (duplicated) suffix state.
+for KEY in PRETTY_NAME VERSION; do
+    BASE=$(sed -n -E "s/^${KEY}=\"([^\"]*)\".*/\\1/p" /etc/os-release)
+    BASE=${BASE%% fast}; BASE=${BASE%% norm}
+    sed -i -E "s|^${KEY}=.*$|${KEY}=\"${BASE} fast\"|" /etc/os-release
+done
+touch /etc/promptli/fast
+
+echo ""
+echo "✅ FAST mode active — aido, zsh, python tools, fbterm, docs removed;"
+echo "   pacman/AUR kept; systemd services masked; one plain getty."
+echo "   Reboot for full effect. Restore with: promptli-norm"
+X
+
+cat > "$INCLUDES/usr/local/bin/promptli-norm" << 'X'; chmod +x "$INCLUDES/usr/local/bin/promptli-norm"
+#!/bin/sh
+# promptLi OS — NORM mode: restore everything promptli-fast removed.
+# Packages come from the internet (apt); aido + tools come from the live
+# ISO when booted from it, otherwise a fresh ISO is downloaded from the
+# website.
+set -eu
+[ "$(id -u)" = 0 ] || exec sudo -E "$0" "$@"
+
+if [ ! -e /etc/promptli/fast ]; then
+    echo "Already in NORM mode."
+    exit 0
+fi
+
+echo "promptLi OS → NORM mode (restoring aido, zsh, tools ...)"
+
+# 1. Reinstall packages from the internet.
+apt-get update -qq
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+    zsh zsh-common zsh-autosuggestions zsh-syntax-highlighting \
+    fzf eza bat ripgrep fd-find zoxide btop tmux \
+    fbterm fonts-noto-mono fonts-dejavu-core fonts-dejavu-mono \
+    python3 python3-pip python3-venv python3-yaml python3-requests \
+    man-db manpages unzip p7zip-full htop 2>/dev/null || true
+
+# 2. Restore aido + tools: live ISO first, else download the ISO.
+SQS=""
+[ -f /run/live/medium/live/filesystem.squashfs ] && SQS=/run/live/medium/live/filesystem.squashfs
+if [ -z "$SQS" ]; then
+    ISO=/var/tmp/promptli-restore.iso
+    MNT=/var/tmp/pl-iso-mnt
+    echo "Downloading promptLi OS ISO to restore aido + tools ..."
+    curl -fL --retry 2 -o "$ISO" "https://webnotes.work/api/os/iso" \
+        || wget -O "$ISO" "https://webnotes.work/api/os/iso" || true
+    if [ -s "$ISO" ]; then
+        mkdir -p "$MNT"
+        mount -o loop,ro "$ISO" "$MNT" 2>/dev/null || true
+        [ -f "$MNT/live/filesystem.squashfs" ] && SQS="$MNT/live/filesystem.squashfs"
+    fi
+fi
+if [ -n "$SQS" ]; then
+    unsquashfs -f -no-progress -d / "$SQS" \
+        opt/aido opt/promptli/tools opt/promptli/promptli-wallpaper.py \
+        usr/local/bin/aido usr/local/bin/locakhost usr/local/bin/promptli \
+        usr/local/bin/promptli-term etc/skel/.fbtermrc 2>/dev/null || true
+    chmod +x /usr/local/bin/aido /usr/local/bin/locakhost \
+        /usr/local/bin/promptli /usr/local/bin/promptli-term 2>/dev/null || true
+fi
+umount /var/tmp/pl-iso-mnt 2>/dev/null || true
+rm -rf /var/tmp/pl-iso-mnt /var/tmp/promptli-restore.iso
+if [ ! -f /root/.fbtermrc ]; then
+    printf 'font-names=DejaVu Sans Mono\nfont-size=14\ntext-encodings=UTF-8\n' > /root/.fbtermrc
+fi
+
+# 3. bash → zsh (usermod, same PAM-proof approach as promptli-fast).
+usermod -s /usr/bin/zsh promptli 2>/dev/null || true
+usermod -s /usr/bin/zsh root 2>/dev/null || true
+sed -i 's|^SHELL=.*|SHELL=/usr/bin/zsh|' /etc/default/useradd 2>/dev/null || true
+
+# 4. Re-enable the units FAST masked (apt timers come back; the build's own
+#    masks — ModemManager, wpa_supplicant, cron, fstrim, e2scrub — stay).
+for unit in apt-daily.timer apt-daily-upgrade.timer; do
+    rm -f "/etc/systemd/system/$unit"
+done
+# Re-apply the build's default mask set so a man-db/etc. reinstall cannot
+# enable timers that promptLi keeps masked (also silences the
+# deb-systemd-helper "preset failed" noise during the installs above).
+for unit in systemd-networkd-wait-online.service NetworkManager-wait-online.service \
+            ModemManager.service man-db.timer fstrim.timer cron.service \
+            wpa_supplicant.service e2scrub_all.timer e2scrub_reap.service \
+            systemd-tmpfiles-clean.timer; do
+    ln -sf /dev/null "/etc/systemd/system/$unit"
+done
+mkdir -p /etc/systemd/logind.conf.d
+printf '[Login]\nNAutoVTs=2\n' > /etc/systemd/logind.conf.d/promptli.conf
+mkdir -p /etc/systemd/system/getty@tty1.service.d
+cat > /etc/systemd/system/getty@tty1.service.d/promptli-fbterm.conf << 'DROP'
+[Service]
+ExecStart=
+ExecStart=-/usr/local/bin/promptli-getty %I
+DROP
+mkdir -p /etc/systemd/journald.conf.d
+printf '[Journal]\nRuntimeMaxUse=16M\nRuntimeMaxFileSize=8M\nSystemMaxUse=64M\n' > /etc/systemd/journald.conf.d/promptli.conf
+
+# 5. Mode marker + os-release (idempotent; repairs broken suffixes).
+rm -f /etc/promptli/fast
+for KEY in PRETTY_NAME VERSION; do
+    BASE=$(sed -n -E "s/^${KEY}=\"([^\"]*)\".*/\\1/p" /etc/os-release)
+    BASE=${BASE%% fast}; BASE=${BASE%% norm}
+    sed -i -E "s|^${KEY}=.*$|${KEY}=\"${BASE} norm\"|" /etc/os-release
+done
+
+echo ""
+echo "✅ NORM mode restored — aido, zsh, tools back; apt timers re-enabled."
+echo "   fastfetch now shows '(norm)'. Reboot for full effect."
 X
 
 # pacman: translation wrapper — Debian packages via apt, AUR packages built
@@ -962,7 +1139,8 @@ cat > /usr/local/bin/promptli-getty << 'GTY'
 # / DRM framebuffers it cannot handle), fall back to the plain Linux console
 # so a login prompt is ALWAYS available — a broken tty1 must never lock the
 # user out. The failure is remembered for this boot via a stamp file.
-TTY="tty${1:-1}"
+# NOTE: getty@tty1 passes %I = "tty1" (WITH the prefix), so use it as-is.
+TTY="${1:-tty1}"
 STAMP=/run/promptli-no-fbterm
 if [ -e /dev/fb0 ] && command -v fbterm >/dev/null 2>&1 && [ ! -e "$STAMP" ]; then
     if fbterm -s 14 -- /bin/login -p; then
@@ -994,6 +1172,7 @@ echo "  [*] Fixing permissions..."
 chown -R root:root /opt/promptli /opt/aido
 chmod +x /usr/local/bin/promptli /usr/local/bin/locakhost /usr/local/bin/aido
 chmod +x /usr/local/bin/pacman /usr/local/bin/promptli-term
+chmod +x /usr/local/bin/promptli-fast /usr/local/bin/promptli-norm
 chmod +x /opt/promptli/setup.sh
 chmod +x /opt/promptli/promptli-wallpaper.py
 chmod +x /opt/aido/src/aido.py

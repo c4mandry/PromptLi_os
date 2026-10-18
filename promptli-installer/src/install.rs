@@ -345,7 +345,17 @@ fn install_bootloader(root: &Path, parts: &PartitionResult) -> io::Result<()> {
     let result = match parts.layout {
         PartitionScheme::Efi => {
             // grub-install for EFI uses the chroot; EFI dir mounted at /boot/efi.
-            let script = "grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=promptLi --recheck && update-grub";
+            // On a real UEFI boot (EFI runtime present) register the NVRAM entry
+            // AND write the removable fallback path; otherwise (e.g. installing
+            // from a BIOS-booted medium) write only EFI/boot/bootx64.efi so any
+            // firmware with empty NVRAM can still find the loader.
+            let script = "if [ -d /sys/firmware/efi ]; then \
+                grub-install --target=x86_64-efi --efi-directory=/boot/efi \
+                --bootloader-id=promptLi --force-extra-removable --recheck; \
+              else \
+                grub-install --target=x86_64-efi --efi-directory=/boot/efi \
+                --bootloader-id=promptLi --removable --recheck; \
+              fi && update-grub";
             run("chroot", &[root.to_str().unwrap_or(""), "/bin/sh", "-c", script])
         }
         PartitionScheme::Bios => {
