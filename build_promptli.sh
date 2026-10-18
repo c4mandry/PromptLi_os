@@ -1224,6 +1224,8 @@ if [ -f "$ISO_PATH" ]; then
     "systemd-networkd + resolved networking (no NetworkManager bloat)",
     "Custom fastfetch identity with the promptLi OS logo",
     "Rust TUI installer (promptli-install); updates via apt/pacman -Syu",
+    "promptli-fast / promptli-norm — stripped server build vs full build (fastfetch shows the mode)",
+    "EFI installs boot on any firmware, even with empty NVRAM (removable GRUB fallback)",
     "Fast, quiet boot with low idle RAM (capped journald, 2 gettys)",
     "locakHost local web server"
   ],
