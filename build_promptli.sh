@@ -8,7 +8,7 @@ set -euo pipefail
 
 # Versioning: major is set by hand. Minor counts features/big changes since
 # v1.0.0 (see git history); patch counts every bug fix, however small.
-VERSION="1.23.1"
+VERSION="1.23.2"
 ISO_NAME="promptli-os-${VERSION}-amd64"
 
 echo "================================================"
@@ -769,6 +769,33 @@ fi
 echo "Console: UTF-8 mode, Unicode font active."
 X
 
+# ── promptli-kb: switch console keymap AFTER login ────────
+# The password prompt always runs on the US/POSIX layout (predictable). This
+# switches the live console to a localized layout once you're in — so local
+# characters work without ever risking a scrambled password prompt.
+cat > "$INCLUDES/usr/local/bin/promptli-kb" << 'X'; chmod +x "$INCLUDES/usr/local/bin/promptli-kb"
+#!/bin/sh
+# promptLi OS — set the console keymap (after login).
+#   promptli-kb et      → Estonian
+#   promptli-kb us      → US (default, back to the login layout)
+#   promptli-kb         → show current layout
+set -e
+if [ "$(id -u)" != 0 ]; then exec sudo -E "$0" "$@"; fi
+K="${1:-}"
+if [ -z "$K" ]; then
+    echo "Current console keymap: $(grep -m1 KEYMAP= /etc/vconsole.conf 2>/dev/null | cut -d= -f2)"
+    exit 0
+fi
+sed -i "s/^KEYMAP=.*/KEYMAP=$K/" /etc/vconsole.conf 2>/dev/null || \
+    echo "KEYMAP=$K" >> /etc/vconsole.conf
+if command -v setupcon >/dev/null 2>&1 && [ -f /etc/default/keyboard ]; then
+    sed -i "s/^XKBLAYOUT=.*/XKBLAYOUT=\"$K\"/" /etc/default/keyboard
+    setupcon --save 2>/dev/null || true
+fi
+command -v loadkeys >/dev/null 2>&1 && loadkeys "$K" 2>/dev/null || true
+echo "Console keymap → $K"
+X
+
 # ── Autostart config system ──────────────────────────────
 mkdir -p "$INCLUDES/etc/promptli/autostart.d" "$INCLUDES/etc/skel/.config/promptli/autostart.d"
 cat > "$INCLUDES/etc/promptli/autostart.d/10-welcome.sh" << 'X'
@@ -779,6 +806,20 @@ if [[ -o interactive && -o login ]]; then
 fi
 X
 chmod +x "$INCLUDES/etc/promptli/autostart.d/10-welcome.sh"
+
+# Apply the user's chosen (post-login) keymap on the local console only,
+# if one was recorded by the installer at /etc/promptli/keymap. The login
+# console stays on US so the password prompt is always predictable.
+cat > "$INCLUDES/etc/promptli/autostart.d/15-keymap.sh" << 'X'
+if [[ -o interactive && -o login ]]; then
+    K=$(grep -m1 . /etc/promptli/keymap 2>/dev/null || true)
+    if [ -n "$K" ] && [ "$K" != us ]; then
+        tty | grep -q '^/dev/tty' && command -v promptli-kb >/dev/null 2>&1 \
+            && sudo -n promptli-kb "$K" >/dev/null 2>&1 || true
+    fi
+fi
+X
+chmod +x "$INCLUDES/etc/promptli/autostart.d/15-keymap.sh"
 
 # ── First-boot setup service ────────────────────────────────
 cat > "$INCLUDES/opt/promptli/setup.sh" << 'X'; chmod +x "$INCLUDES/opt/promptli/setup.sh"
@@ -859,11 +900,17 @@ echo "⚡ Customizing promptLi OS..."
 # /etc/default/keyboard and regenerate the cached keymap so keyboard-setup
 # and console-setup load it at boot. vconsole.conf gets a real KEYMAP= too
 # for systemd-vconsole-setup (harmless and correct if present).
-echo "  [*] Setting console keymap (et) via console-setup..."
+echo "  [*] Setting console keymap (us at login, localized after login)..."
 mkdir -p /etc/default
+# The LOGIN console must be a predictable, dead-key-free layout (US/POSIX)
+# so the password prompt can never be scrambled by a half-applied regional
+# keymap. Users switch to their local layout after login via `promptli-kb`.
+# (A regional keymap at the login prompt is a classic "password should work
+# but comes back wrong" trap — e.g. AltGr dead keys and shifted symbols
+# landing differently than expected.)
 cat > /etc/default/keyboard << 'KB'
 XKBMODEL="pc105"
-XKBLAYOUT="et"
+XKBLAYOUT="us"
 XKBVARIANT=""
 XKBOPTIONS=""
 BACKSPACE="guess"
@@ -980,7 +1027,7 @@ apt-mark manual kbd console-setup console-setup-linux keyboard-configuration 2>/
 if [ -L /etc/vconsole.conf ]; then
     rm -f /etc/vconsole.conf
 fi
-printf 'KEYMAP=et\nFONT=Lat2-Terminus16\n' > /etc/vconsole.conf
+printf 'KEYMAP=us\nFONT=Lat2-Terminus16\n' > /etc/vconsole.conf
 # Also stop Debian's tmpfiles rule (usr/lib/tmpfiles.d/debian.conf) from
 # re-symlinking /etc/vconsole.conf to /etc/default/keyboard at boot; an
 # /etc/tmpfiles.d file with the SAME name shadows it entirely.
@@ -993,7 +1040,7 @@ d /run/sendsigs.omit.d 0755 root root -
 d /run/lock 1777 root root -
 L+ /etc/mtab - - - - ../proc/self/mounts
 L+ /etc/default/locale - - - - ../locale.conf
-f /etc/vconsole.conf 0644 root root - KEYMAP=et\nFONT=Lat2-Terminus16\n
+f /etc/vconsole.conf 0644 root root - KEYMAP=us\nFONT=Lat2-Terminus16\n
 TC
 # dbus-broker does not ship a dbus.socket unit (the purged dbus package owned
 # it) and without it the broker can never be socket-activated — logins would
@@ -1113,6 +1160,7 @@ echo "  [*] Fixing permissions..."
 chown -R root:root /opt/promptli /opt/aido
 chmod +x /usr/local/bin/promptli /usr/local/bin/locakhost /usr/local/bin/aido
 chmod +x /usr/local/bin/pacman /usr/local/bin/promptli-term
+chmod +x /usr/local/bin/promptli-kb
 chmod +x /usr/local/bin/promptli-fast /usr/local/bin/promptli-norm
 chmod +x /opt/promptli/setup.sh
 chmod +x /opt/aido/src/aido.py

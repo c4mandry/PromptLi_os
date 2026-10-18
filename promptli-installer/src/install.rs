@@ -190,19 +190,26 @@ fn write_keymap(root: &Path, keymap: &str) -> io::Result<()> {
             let _ = std::fs::remove_file(&vconsole);
         }
     }
+    // The LOGIN console stays on US/POSIX (predictable, dead-key-free) so the
+    // password prompt can never be scrambled by a regional layout. The user's
+    // chosen layout is applied AFTER login (see promptli-kb), so a mismatch
+    // can't lock them out at the password prompt.
     std::fs::write(
         &vconsole,
-        format!("KEYMAP={keymap}\nFONT=Uni2-Terminus16\n"),
+        "KEYMAP=us\nFONT=Uni2-Terminus16\n",
+    )?;
+    // Record the user's chosen layout as the post-login default.
+    std::fs::create_dir_all(root.join("etc/promptli"))?;
+    std::fs::write(
+        root.join("etc/promptli/keymap"),
+        format!("{keymap}\n"),
     )?;
     let keyboard = format!(
-        "XKBMODEL=\"pc105\"\nXKBLAYOUT=\"{keymap}\"\nXKBVARIANT=\"\"\nXKBOPTIONS=\"\"\n"
+        "XKBMODEL=\"pc105\"\nXKBLAYOUT=\"us\"\nXKBVARIANT=\"\"\nXKBOPTIONS=\"\"\n"
     );
     std::fs::write(root.join("etc/default/keyboard"), keyboard)?;
     // Regenerate console-setup's cached keymap so keyboard-setup.service
-    // loads THIS layout at boot — writing /etc/default/keyboard alone is not
-    // enough because /etc/console-setup/cached_*.kmap.gz still holds the
-    // live image's keymap (us), which would leave the console in dead-key
-    // garbage (<ffffffff> / colored backgrounds on keypress).
+    // loads the US layout at boot (consistent with the login console above).
     run(
         "chroot",
         &[
@@ -227,7 +234,7 @@ fn write_keymap(root: &Path, keymap: &str) -> io::Result<()> {
              d /run/lock 1777 root root -\n\
              L+ /etc/mtab - - - - ../proc/self/mounts\n\
              L+ /etc/default/locale - - - - ../locale.conf\n\
-             f /etc/vconsole.conf 0644 root root - KEYMAP={keymap}\\nFONT=Lat2-Terminus16\\n\n"
+             f /etc/vconsole.conf 0644 root root - KEYMAP=us\nFONT=Lat2-Terminus16\n\n"
         ),
     )?;
     Ok(())
