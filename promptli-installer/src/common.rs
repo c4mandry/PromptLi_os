@@ -38,6 +38,28 @@ pub fn distro_version() -> String {
     "1.0.0".to_string()
 }
 
+/// Compare two dotted `major.minor.patch` version strings.
+/// Returns std::cmp::Ordering. Numeric comparison (so 1.10.0 > 1.9.0); any
+/// non-numeric segment is treated as 0.
+pub fn compare_version(a: &str, b: &str) -> std::cmp::Ordering {
+    let parse = |v: &str| -> Vec<u64> {
+        v.split('.')
+            .map(|p| p.parse::<u64>().unwrap_or(0))
+            .collect()
+    };
+    let va = parse(a);
+    let vb = parse(b);
+    let n = va.len().max(vb.len());
+    for i in 0..n {
+        let x = va.get(i).copied().unwrap_or(0);
+        let y = vb.get(i).copied().unwrap_or(0);
+        if x != y {
+            return x.cmp(&y);
+        }
+    }
+    std::cmp::Ordering::Equal
+}
+
 /// Machine state written onto the installed system after a successful install.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InstallState {
@@ -76,5 +98,19 @@ impl Disk {
         } else {
             format!("{:.1} {}", v, units[i])
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::compare_version;
+
+    #[test]
+    fn version_ordering() {
+        assert_eq!(compare_version("1.23.0", "1.23.0"), std::cmp::Ordering::Equal);
+        assert_eq!(compare_version("1.24.0", "1.23.3"), std::cmp::Ordering::Greater);
+        assert_eq!(compare_version("1.9.0", "1.10.0"), std::cmp::Ordering::Less);
+        assert_eq!(compare_version("2.0.0", "1.99.99"), std::cmp::Ordering::Greater);
+        assert_eq!(compare_version("1.23.3", "1.23.10"), std::cmp::Ordering::Less);
     }
 }

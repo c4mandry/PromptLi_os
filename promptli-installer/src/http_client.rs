@@ -37,3 +37,16 @@ pub fn enroll(site_url: &str, version: &str, hostname: &str, machine_id: &str) -
 fn trim_slash(s: &str) -> &str {
     s.trim_end_matches('/')
 }
+
+/// GET /api/os/latest → the release manifest (version, iso_url, sha256, …).
+/// Returns the parsed JSON, or None if the endpoint is unreachable/missing.
+pub fn fetch_latest(site_url: &str) -> Option<serde_json::Value> {
+    let resp = ureq::get(&format!("{}/api/os/latest", trim_slash(site_url)))
+        .set("Accept", "application/json")
+        .call()
+        .ok()?;
+    if resp.status() != 200 {
+        return None;
+    }
+    resp.into_json::<serde_json::Value>().ok()
+}

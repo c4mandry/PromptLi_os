@@ -8,7 +8,7 @@ set -euo pipefail
 
 # Versioning: major is set by hand. Minor counts features/big changes since
 # v1.0.0 (see git history); patch counts every bug fix, however small.
-VERSION="1.24.0"
+VERSION="1.24.1"
 ISO_NAME="promptli-os-${VERSION}-amd64"
 
 echo "================================================"
@@ -471,6 +471,11 @@ case "$1" in
         apt-get upgrade
         ;;
     -Syu|-Suy)
+        # Full system update: apt packages AND the promptLi release layer,
+        # via promptli-update --apply (which checks /api/os/latest).
+        if command -v promptli-update >/dev/null 2>&1; then
+            exec promptli-update --apply
+        fi
         apt-get update && apt-get upgrade
         ;;
     -Ss)
