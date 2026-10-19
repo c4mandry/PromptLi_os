@@ -87,7 +87,7 @@ for attempt in 1 2 3 4 5; do
         -H "Authorization: token $TOKEN" \
         -H "Content-Type: application/octet-stream" \
         --data-binary "@$ISO" \
-        "https://uploads.github.com/repos/$REPO/releases/$RELEASE_ID/assets?name=promptli-os-$VERSION-amd64.iso")
+        "https://uploads.github.com/repos/$REPO/releases/$RELEASE_ID/assets?name=promptli-os-$VERSION-amd64.iso" || echo 000)
     echo "upload attempt $attempt: HTTP $CODE"
     if [ "$CODE" = "201" ]; then
         UPLOADED=1
