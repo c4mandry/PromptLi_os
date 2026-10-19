@@ -673,6 +673,164 @@ def run_command(command: str, timeout: int = 60, sudo_ctx: dict[str, Any] | None
     }
 
 
+def _run_sudo_cmd(args: list[str], sudo_ctx: dict[str, Any] | None, timeout: int = 120) -> subprocess.CompletedProcess:
+    """Run a command, via sudo -S when *sudo_ctx* has a password."""
+    password = (sudo_ctx or {}).get("password") if isinstance(sudo_ctx, dict) else None
+    if password:
+        proc = subprocess.Popen(
+            ["sudo", "-S", "--", *args],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        out, err = proc.communicate(password + "\n", timeout=timeout)
+        return subprocess.CompletedProcess(args, proc.returncode, out, err)
+    return subprocess.run(args, capture_output=True, text=True, timeout=timeout, check=False)
+
+
+def read_file(path: str, allowed_dirs: list[str] | None = None) -> dict[str, Any]:
+    """Read a text file and return its content (capped at 20k chars)."""
+    target = _resolve(path, allowed_dirs)
+    try:
+        content = target.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        raise utils.AidoError(f"Cannot read {target}: {exc}") from None
+    truncated = len(content) > 20000
+    return {"path": str(target), "content": content[:20000], "truncated": truncated}
+
+
+def write_file(path: str, content: str, allowed_dirs: list[str] | None = None) -> dict[str, Any]:
+    """Create or overwrite a file with the given content."""
+    target = _resolve(path, allowed_dirs)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(str(content), encoding="utf-8")
+    return {"path": str(target), "bytes": len(str(content)), "status": "written"}
+
+
+def append_file(path: str, content: str, allowed_dirs: list[str] | None = None) -> dict[str, Any]:
+    """Append content to a file (creating it if needed)."""
+    target = _resolve(path, allowed_dirs)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with open(target, "a", encoding="utf-8") as fh:
+        fh.write(str(content))
+    return {"path": str(target), "status": "appended"}
+
+
+def create_directory(path: str, allowed_dirs: list[str] | None = None) -> dict[str, Any]:
+    """Create a directory (and parents)."""
+    target = _resolve(path, allowed_dirs)
+    target.mkdir(parents=True, exist_ok=True)
+    return {"path": str(target), "status": "created"}
+
+
+def delete_path(path: str, allowed_dirs: list[str] | None = None) -> dict[str, Any]:
+    """Delete a file or an empty directory."""
+    target = _resolve(path, allowed_dirs)
+    try:
+        if target.is_dir() and not target.is_symlink():
+            target.rmdir()
+        else:
+            target.unlink()
+    except OSError as exc:
+        raise utils.AidoError(f"Cannot delete {target}: {exc}") from None
+    return {"path": str(target), "status": "deleted"}
+
+
+def move_path(src: str, dst: str, allowed_dirs: list[str] | None = None) -> dict[str, Any]:
+    """Rename or move a file/directory."""
+    source = _resolve(src, allowed_dirs)
+    dest = _resolve(dst, allowed_dirs)
+    source.rename(dest)
+    return {"from": str(source), "to": str(dest), "status": "moved"}
+
+
+def copy_path(src: str, dst: str, allowed_dirs: list[str] | None = None) -> dict[str, Any]:
+    """Copy a file or directory tree."""
+    import shutil
+
+    source = _resolve(src, allowed_dirs)
+    dest = _resolve(dst, allowed_dirs)
+    if source.is_dir():
+        shutil.copytree(source, dest, dirs_exist_ok=True)
+    else:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, dest)
+    return {"from": str(source), "to": str(dest), "status": "copied"}
+
+
+def install_package(package: str, sudo_ctx: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Install a package (apt, with sudo when sudo mode is on)."""
+    if not package or not isinstance(package, str) or any(c in package for c in "&;|`$"):
+        raise utils.AidoError("install_package needs a plain package name.")
+    try:
+        proc = _run_sudo_cmd(["apt-get", "install", "-y", "--no-install-recommends", package], sudo_ctx)
+    except subprocess.TimeoutExpired:
+        raise utils.AidoError(f"Package install timed out: {package}") from None
+    return {
+        "package": package,
+        "exit_code": proc.returncode,
+        "stdout": utils.truncate((proc.stdout or "").strip() or "(no output)"),
+        "stderr": utils.truncate((proc.stderr or "").strip() or ""),
+    }
+
+
+def remove_package(package: str, sudo_ctx: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Remove a package (apt)."""
+    if not package or not isinstance(package, str) or any(c in package for c in "&;|`$"):
+        raise utils.AidoError("remove_package needs a plain package name.")
+    try:
+        proc = _run_sudo_cmd(["apt-get", "remove", "-y", package], sudo_ctx)
+    except subprocess.TimeoutExpired:
+        raise utils.AidoError(f"Package removal timed out: {package}") from None
+    return {
+        "package": package,
+        "exit_code": proc.returncode,
+        "stdout": utils.truncate((proc.stdout or "").strip() or "(no output)"),
+        "stderr": utils.truncate((proc.stderr or "").strip() or ""),
+    }
+
+
+def service_action(service: str, action: str, sudo_ctx: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Control a systemd service: start, stop, restart, enable, disable, status, reload."""
+    allowed = {"start", "stop", "restart", "enable", "disable", "status", "reload"}
+    if action not in allowed:
+        raise utils.AidoError(f"service_action: action must be one of {sorted(allowed)}.")
+    if not service or not isinstance(service, str) or any(c in service for c in "&;|`$ /"):
+        raise utils.AidoError("service_action needs a plain unit name.")
+    try:
+        proc = _run_sudo_cmd(["systemctl", action, service], sudo_ctx, timeout=60)
+    except subprocess.TimeoutExpired:
+        raise utils.AidoError(f"systemctl {action} {service} timed out") from None
+    return {
+        "service": service,
+        "action": action,
+        "exit_code": proc.returncode,
+        "stdout": utils.truncate((proc.stdout or "").strip() or "(no output)"),
+        "stderr": utils.truncate((proc.stderr or "").strip() or ""),
+    }
+
+
+def network_info() -> dict[str, Any]:
+    """Network status: addresses, default route, DNS servers."""
+    import json as _json
+
+    out: dict[str, Any] = {}
+    try:
+        ip = utils.run_command(["ip", "-json", "addr"])
+        out["addresses"] = _json.loads(ip.stdout)
+    except Exception:
+        out["addresses"] = "unavailable"
+    try:
+        route = utils.run_command(["ip", "route", "show", "default"])
+        out["default_route"] = route.stdout.strip() or "none"
+    except Exception:
+        out["default_route"] = "unavailable"
+    try:
+        dns = utils.run_command(["sh", "-c", "grep -h '^nameserver' /etc/resolv.conf 2>/dev/null | awk '{print $2}'"])
+        out["dns_servers"] = dns.stdout.strip().splitlines()
+    except Exception:
+        out["dns_servers"] = []
+    return out
+
+
 TOOL_REGISTRY: list[dict[str, Any]] = [
     {
         "name": "list_files",
@@ -818,6 +976,72 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
         "parameters": {"command": "the shell command to run, e.g. 'df -h'", "timeout": "optional timeout in seconds (default 60)"},
         "dangerous": True,
     },
+    {
+        "name": "read_file",
+        "description": "Read a text file and return its content (capped at 20k characters).",
+        "parameters": {"path": "file path"},
+        "dangerous": False,
+    },
+    {
+        "name": "write_file",
+        "description": "Create or overwrite a file with the given content (directories are created as needed).",
+        "parameters": {"path": "file path", "content": "full file content"},
+        "dangerous": True,
+    },
+    {
+        "name": "append_file",
+        "description": "Append content to a file (creating it if needed).",
+        "parameters": {"path": "file path", "content": "content to append"},
+        "dangerous": True,
+    },
+    {
+        "name": "create_directory",
+        "description": "Create a directory (and parents).",
+        "parameters": {"path": "directory path"},
+        "dangerous": False,
+    },
+    {
+        "name": "delete_path",
+        "description": "Delete a file or an empty directory.",
+        "parameters": {"path": "path to delete"},
+        "dangerous": True,
+    },
+    {
+        "name": "move_path",
+        "description": "Rename or move a file/directory.",
+        "parameters": {"src": "source path", "dst": "destination path"},
+        "dangerous": False,
+    },
+    {
+        "name": "copy_path",
+        "description": "Copy a file or directory tree.",
+        "parameters": {"src": "source path", "dst": "destination path"},
+        "dangerous": False,
+    },
+    {
+        "name": "install_package",
+        "description": "Install a package with apt (uses sudo when sudo mode is on).",
+        "parameters": {"package": "package name"},
+        "dangerous": True,
+    },
+    {
+        "name": "remove_package",
+        "description": "Remove a package with apt.",
+        "parameters": {"package": "package name"},
+        "dangerous": True,
+    },
+    {
+        "name": "service_action",
+        "description": "Control a systemd service: start, stop, restart, enable, disable, status, reload.",
+        "parameters": {"service": "unit name, e.g. 'sshd'", "action": "start|stop|restart|enable|disable|status|reload"},
+        "dangerous": True,
+    },
+    {
+        "name": "network_info",
+        "description": "Network status: addresses, default route, DNS servers.",
+        "parameters": {},
+        "dangerous": False,
+    },
 ]
 
 TOOL_FUNCTIONS: dict[str, Any] = {
@@ -845,6 +1069,17 @@ TOOL_FUNCTIONS: dict[str, Any] = {
     "browse_page": browse_page,
     "download_file": download_file,
     "run_command": run_command,
+    "read_file": read_file,
+    "write_file": write_file,
+    "append_file": append_file,
+    "create_directory": create_directory,
+    "delete_path": delete_path,
+    "move_path": move_path,
+    "copy_path": copy_path,
+    "install_package": install_package,
+    "remove_package": remove_package,
+    "service_action": service_action,
+    "network_info": network_info,
 }
 
 # Safety net: every registered tool must have an implementation, and vice versa.

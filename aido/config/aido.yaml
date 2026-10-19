@@ -16,18 +16,26 @@ model:
 
 agent:
   # How many tool-calling rounds the agent may perform per request.
-  max_tool_iterations: 5
+  max_tool_iterations: 10
   # How many recent messages are kept in the model context.
   max_history_messages: 12
 
 safety:
   # Ask before closing windows or killing processes.
   confirm_destructive: true
-  # File tools may only access these directories (the default sandbox is
-  # the home directory; add other roots only if you trust them).
+  # File tools may only access these directories. The agent has real
+  # control over the machine — the sandbox covers the system dirs it
+  # usually needs while keeping the rest untouched.
   # Note: quote "~" so YAML does not parse it as null.
   allowed_dirs:
     - "~"
+    - "/etc"
+    - "/opt"
+    - "/srv"
+    - "/var/log"
+    - "/var/www"
+    - "/tmp"
+    - "/usr/local"
   # Automatically back up config files before editing them.
   auto_backup_configs: true
 

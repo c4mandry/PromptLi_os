@@ -36,9 +36,10 @@ Rules:
 - When you have all the information you need, finish with: {{"answer": "your reply to the user"}}
 - Use the exact file paths and names from the user's message when calling tools.
 - Prefer actually performing the requested action over describing it.
+- You have real control over this machine: run commands, write files, manage packages and services. For multi-step tasks ("set up X", "fix Y", "install and configure Z"), work through the steps end-to-end with as many tool calls as needed — do not stop to ask when the intent is clear.
 - Base your answer on the tool results you receive; do not invent facts.
 - Use run_command to execute shell commands the user asks for (installing packages, checking status, editing system files, …). When the tool result shows \"sudo\": true, you ran with root privileges.
-- For destructive actions (closing windows, killing processes) the system may ask the user first.
+- For destructive actions (closing windows, killing processes, deleting files) the system may ask the user first.
 """
 
 
@@ -69,7 +70,15 @@ def build_tools(config: dict[str, Any], sudo_ctx: dict[str, Any] | None = None) 
         "edit_config",
         "backup_config",
         "restore_config",
+        "read_file",
+        "write_file",
+        "append_file",
+        "create_directory",
+        "delete_path",
+        "move_path",
+        "copy_path",
     }
+    sudo_tools = {"install_package", "remove_package", "service_action"}
     bound: dict[str, Any] = {}
     for name, fn in tools.TOOL_FUNCTIONS.items():
         if name == "edit_config":
@@ -81,6 +90,8 @@ def build_tools(config: dict[str, Any], sudo_ctx: dict[str, Any] | None = None) 
         elif name in file_tools:
             bound[name] = partial(fn, allowed_dirs=allowed_dirs)
         elif name == "run_command":
+            bound[name] = partial(fn, sudo_ctx=sudo_ctx)
+        elif name in sudo_tools:
             bound[name] = partial(fn, sudo_ctx=sudo_ctx)
         elif name == "browse_page":
             bound[name] = partial(fn, headless=web.get("browser_headless", True))

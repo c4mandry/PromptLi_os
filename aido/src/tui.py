@@ -116,9 +116,9 @@ class ChatTui:
         self.events.put(("token", token))
 
     def _on_confirm(self, name: str, arguments: dict) -> bool:
-        # Sudo mode ON = the user has pre-authorized privileged commands:
-        # run_command is auto-approved so aido can use the sudo password freely.
-        if self.sudo_on and name == "run_command":
+        # Sudo mode ON = the user has pre-authorized privileged actions:
+        # everything is auto-approved so aido can work freely as root.
+        if self.sudo_on:
             self.events.put(("sysmsg", f"⚙ {name} {arguments} — auto-approved (sudo mode)"))
             return True
         self.events.put(("confirm", name, arguments))

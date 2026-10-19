@@ -124,7 +124,8 @@ def test_load_config_returns_defaults_when_missing(tmp_path, monkeypatch):
     monkeypatch.delenv("AIDO_CONFIG", raising=False)
     config = utils.load_config()
     assert config["model"]["context_size"] == 2048
-    assert config["safety"]["allowed_dirs"] == ["~"]
+    assert "~" in config["safety"]["allowed_dirs"]
+    assert "/etc" in config["safety"]["allowed_dirs"]
 
 
 def test_shipped_config_parses_allowed_dirs_as_strings():
@@ -132,7 +133,8 @@ def test_shipped_config_parses_allowed_dirs_as_strings():
     from pathlib import Path
 
     config = utils.load_config(str(Path(__file__).resolve().parent.parent / "config" / "aido.yaml"))
-    assert config["safety"]["allowed_dirs"] == ["~"]
+    assert "~" in config["safety"]["allowed_dirs"]
+    assert "/etc" in config["safety"]["allowed_dirs"]
 
 
 # -- confirmation -----------------------------------------------------------------

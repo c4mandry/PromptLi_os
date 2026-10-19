@@ -178,6 +178,7 @@ class Repl:
         self.model_path = str(model_path)
         self.model_name = Path(self.model_path).name
         self.sudo_on = False
+        self.auto_approve = False
         self.attached_file: str | None = None
         self.attached_name: str | None = None
         self.session = session_name or "default"
@@ -224,7 +225,12 @@ class Repl:
     # -- agent plumbing ---------------------------------------------------
 
     def _confirm(self, name: str, arguments: dict) -> bool:
-        if self.sudo_on and name == "run_command":
+        # Full autonomy: .auto mode, or sudo mode (the user gave the root
+        # password — aido may act freely).
+        if self.auto_approve:
+            print(_c(_DIM, f"  ⚙ {name} {arguments} — auto-approved (.auto)"))
+            return True
+        if self.sudo_on:
             print(_c(_DIM, f"  ⚙ {name} {arguments} — auto-approved (sudo)"))
             return True
         try:
@@ -322,7 +328,8 @@ class Repl:
                         "  .session <name>      switch session (list with no name)",
                         "  .file <path>         attach a file to the next message",
                         "  .editor              compose a long message in $EDITOR",
-                        "  .sudo                toggle sudo mode (commands as root)",
+                        "  .sudo                toggle sudo mode (commands as root, auto-approves)",
+                        "  .auto                toggle auto mode (no confirmations at all)",
                         "  .tools               list available tools",
                         "  .exit / .quit        quit (session is saved)",
                         "",
@@ -344,6 +351,7 @@ class Repl:
             print(f"session:  {self.session}")
             print(f"role:     {getattr(self, 'current_role', None) or 'agent (built-in)'}")
             print(f"sudo:     {'ON' if self.sudo_on else 'OFF'}")
+            print(f"auto:     {'ON' if self.auto_approve else 'OFF'}")
             print(f"API key:  {key_status}")
             return True
         if name == "model":
@@ -436,6 +444,11 @@ class Repl:
                 print(_c(_DIM, "sudo mode OFF"))
             else:
                 self._ask_sudo_password()
+            return True
+        if name == "auto":
+            self.auto_approve = not self.auto_approve
+            state = "ON" if self.auto_approve else "OFF"
+            print(_c(_YELLOW if self.auto_approve else _DIM, f"auto mode {state} — aido acts without confirmations"))
             return True
         if name == "tools":
             from tools import TOOL_REGISTRY

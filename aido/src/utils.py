@@ -41,12 +41,21 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "top_p": 0.9,
     },
     "agent": {
-        "max_tool_iterations": 5,
+        "max_tool_iterations": 10,
         "max_history_messages": 12,
     },
     "safety": {
         "confirm_destructive": True,
-        "allowed_dirs": ["~"],
+        "allowed_dirs": [
+            "~",
+            "/etc",
+            "/opt",
+            "/srv",
+            "/var/log",
+            "/var/www",
+            "/tmp",
+            "/usr/local",
+        ],
         "auto_backup_configs": True,
     },
     "web": {
