@@ -143,7 +143,9 @@ fn apply_release(version: &str) -> io::Result<()> {
     }
 
     // Unsquash the promptLi-owned paths into / (overwrites in place).
-    let paths = "opt/aido opt/promptli etc/fastfetch etc/skel etc/zsh etc/os-release \
+    // /etc/os-release is handled separately below so the fast/norm mode
+    // suffix survives the upgrade.
+    let paths = "opt/aido opt/promptli etc/fastfetch etc/skel etc/zsh \
                  etc/profile.d/promptli-version.sh usr/local/bin/aido usr/local/bin/pacman \
                  usr/local/bin/promptli usr/local/bin/promptli-term usr/local/bin/promptli-kb \
                  usr/local/bin/promptli-fast usr/local/bin/promptli-norm \
@@ -157,6 +159,24 @@ fn apply_release(version: &str) -> io::Result<()> {
     if !out.is_empty() {
         eprintln!("{out}");
     }
+
+    // Update the version in /etc/os-release while preserving the fast/norm
+    // mode suffix (promptli-fast/norm append it to PRETTY_NAME and VERSION).
+    let _ = proc::run_capture_combined(
+        "sh",
+        &[
+            "-c",
+            &format!(
+                "unsquashfs -f -no-progress -d /tmp/promptli-osrel {sq} etc/os-release 2>/dev/null && \
+                 MODE=$(sed -n 's/^PRETTY_NAME=.* (\\(fast\\|norm\\))\"/\\1/p' /etc/os-release | tail -1); \
+                 cp -f /tmp/promptli-osrel/etc/os-release /etc/os-release; \
+                 if [ -n \"$MODE\" ]; then \
+                   sed -i -E \"s|^(PRETTY_NAME=.*)\\|\\1 $MODE\\|; s|^(VERSION=.*)\\|\\1 $MODE\\|\" /etc/os-release; \
+                 fi; \
+                 rm -rf /tmp/promptli-osrel"
+            ),
+        ],
+    );
 
     // Fix permissions on the extracted binaries.
     proc::run_capture_combined(

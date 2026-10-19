@@ -22,6 +22,30 @@ pub struct InstallOptions {
     pub timezone: String,
     pub site_url: String,
     pub version: String,
+    pub drivers: Vec<String>,
+}
+
+/// Hardware driver groups and the packages they own. All groups ship in the
+/// base image; the installer purges the ones the user deselected (offline).
+pub const DRIVER_GROUPS: &[(&str, &[&str])] = &[
+    ("wifi", &["wpasupplicant", "iw", "wireless-tools"]),
+    ("bluetooth", &["bluez"]),
+    ("audio", &["pipewire", "pipewire-pulse", "wireplumber", "alsa-utils"]),
+];
+
+/// Purge driver groups NOT present in *selected* (offline dpkg in chroot).
+fn apply_drivers(root: &Path, selected: &[String]) {
+    for (group, packages) in DRIVER_GROUPS {
+        if selected.iter().any(|d| d == *group) {
+            continue;
+        }
+        let list = packages.join(" ");
+        let script = format!(
+            "dpkg --purge --force-depends {list} 2>/dev/null || true; \
+             dpkg --purge {list} 2>/dev/null || true"
+        );
+        let _ = run("chroot", &[root.to_str().unwrap_or(""), "/bin/sh", "-c", &script]);
+    }
 }
 
 /// Find the live squashfs/rootfs on this running system.
@@ -106,6 +130,10 @@ pub fn run_install(
         &opts.password,
         &opts.root_password,
     )?;
+
+    // ── Hardware drivers (offline; purge deselected groups) ──
+    progress("Applying driver selection");
+    apply_drivers(target_dir, &opts.drivers);
 
     // ── Bootloader ────────────────────────────────────────
     progress("Installing bootloader");

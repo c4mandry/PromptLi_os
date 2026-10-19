@@ -8,7 +8,7 @@ set -euo pipefail
 
 # Versioning: major is set by hand. Minor counts features/big changes since
 # v1.0.0 (see git history); patch counts every bug fix, however small.
-VERSION="1.27.0"
+VERSION="1.28.0"
 ISO_NAME="promptli-os-${VERSION}-amd64"
 
 echo "================================================"
@@ -152,7 +152,21 @@ kbd console-setup
 
 # Networking: systemd-networkd + resolved (lean; no NetworkManager/dbus bloat)
 # wpa_supplicant + iw stay for WiFi
-wpasupplicant iw iproute2
+wpasupplicant iw wireless-tools iproute2
+
+# ── Hardware driver groups ────────────────────────────────
+# All driver packages ship in the base image so the installer can keep or
+# purge them OFFLINE (dpkg in the chroot needs no network): the TUI/flags
+# let the user choose exactly which groups to install.
+#   wifi:      wpasupplicant iw wireless-tools (+ firmware, pulled below)
+#   bluetooth: bluez
+#   audio:     pipewire pipewire-pulse wireplumber alsa-utils
+bluez pipewire pipewire-pulse wireplumber alsa-utils
+
+# Firmware blobs (non-free-firmware): keep the common wifi/bluetooth/audio
+# firmwares so driver groups actually work on real hardware.
+firmware-linux firmware-misc-nonfree firmware-iwlwifi firmware-realtek
+firmware-ath9k-htc firmware-brcm80211 firmware-intel-sound firmware-sof-signed
 
 # Modern framebuffer console packages are NOT shipped: fbterm's keyboard
 # input is broken on modern kernels. The plain console runs in UTF-8 mode
@@ -402,7 +416,7 @@ done
 mkdir -p /etc/systemd/logind.conf.d
 printf '[Login]\nNAutoVTs=2\n' > /etc/systemd/logind.conf.d/promptli.conf
 mkdir -p /etc/systemd/system/getty@tty1.service.d
-cat > /etc/systemd/system/getty@tty1.service.d/promptli-fbterm.conf << 'DROP'
+cat > /etc/systemd/system/getty@tty1.service.d/promptli-getty.conf << 'DROP'
 [Service]
 ExecStart=
 ExecStart=-/usr/local/bin/promptli-getty %I
@@ -1131,7 +1145,7 @@ apt-mark manual kbd console-setup console-setup-linux keyboard-configuration 2>/
 if [ -L /etc/vconsole.conf ]; then
     rm -f /etc/vconsole.conf
 fi
-printf 'KEYMAP=us\nFONT=Lat2-Terminus16\n' > /etc/vconsole.conf
+printf 'KEYMAP=us\nFONT=Uni2-Terminus16\n' > /etc/vconsole.conf
 # Also stop Debian's tmpfiles rule (usr/lib/tmpfiles.d/debian.conf) from
 # re-symlinking /etc/vconsole.conf to /etc/default/keyboard at boot; an
 # /etc/tmpfiles.d file with the SAME name shadows it entirely.
@@ -1144,7 +1158,7 @@ d /run/sendsigs.omit.d 0755 root root -
 d /run/lock 1777 root root -
 L+ /etc/mtab - - - - ../proc/self/mounts
 L+ /etc/default/locale - - - - ../locale.conf
-f /etc/vconsole.conf 0644 root root - KEYMAP=us\nFONT=Lat2-Terminus16\n
+f /etc/vconsole.conf 0644 root root - KEYMAP=us\nFONT=Uni2-Terminus16\n
 TC
 # dbus-broker does not ship a dbus.socket unit (the purged dbus package owned
 # it) and without it the broker can never be socket-activated — logins would
@@ -1243,7 +1257,7 @@ exec /sbin/agetty --noclear --login-program /bin/login "$TTY" 115200 linux
 GTY
 chmod +x /usr/local/bin/promptli-getty
 mkdir -p /etc/systemd/system/getty@tty1.service.d
-cat > /etc/systemd/system/getty@tty1.service.d/promptli-fbterm.conf << 'DROP'
+cat > /etc/systemd/system/getty@tty1.service.d/promptli-getty.conf << 'DROP'
 [Service]
 ExecStart=
 ExecStart=-/usr/local/bin/promptli-getty %I

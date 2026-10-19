@@ -277,6 +277,15 @@ class Repl:
         t0 = time.time()
         try:
             result = self.agent.chat(text, interactive=True, assume_yes=False, stream_callback=on_token)
+        except KeyboardInterrupt:
+            # Ctrl+C during a reply: cancel gracefully, keep the REPL alive.
+            renderer.flush()
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+            print(_c(_DIM, "  (interrupted)"))
+            self.messages.append({"role": "assistant", "content": "(interrupted)"})
+            self._autosave()
+            return
         except utils.AidoError as exc:
             print(_c("\033[31m", f"❌ {exc}"))
             return

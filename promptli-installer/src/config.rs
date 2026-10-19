@@ -27,6 +27,10 @@ pub struct Config {
     pub timezone: String,
     /// Enrollment site URL.
     pub site_url: String,
+    /// Hardware driver groups to install: subset of wifi/bluetooth/audio.
+    /// (All groups ship in the base image; the installer purges the
+    /// deselected ones — works fully offline.)
+    pub drivers: Vec<String>,
     /// Set when the interactive TUI has run the install (success or not).
     pub installed: bool,
 }
@@ -44,6 +48,7 @@ impl Default for Config {
             keymap: "us".to_string(),
             timezone: "UTC".to_string(),
             site_url: crate::common::DEFAULT_SITE_URL.to_string(),
+            drivers: vec!["wifi".to_string()],
             installed: false,
         }
     }
@@ -71,6 +76,14 @@ pub fn summary_rows(c: &Config) -> Vec<(String, String)> {
         ("Root password".to_string(), root_pw),
         ("Keymap".to_string(), c.keymap.clone()),
         ("Timezone".to_string(), c.timezone.clone()),
+        (
+            "Drivers".to_string(),
+            if c.drivers.is_empty() {
+                "none".to_string()
+            } else {
+                c.drivers.join(", ")
+            },
+        ),
         ("Update server".to_string(), c.site_url.clone()),
     ]
 }

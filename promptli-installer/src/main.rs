@@ -133,6 +133,12 @@ fn run_installer(args: &[String]) -> i32 {
             "--efi" => {
                 cfg.layout = crate::disk::PartitionScheme::Efi;
             }
+            "--drivers" => {
+                if let Some(v) = next() {
+                    cfg.drivers = parse_drivers(&v);
+                }
+                i += 1;
+            }
             "--version" => {
                 i += 1; // accepted for compatibility; version comes from env
             }
@@ -185,6 +191,25 @@ fn run_installer(args: &[String]) -> i32 {
     install_and_report(&cfg)
 }
 
+fn parse_drivers(spec: &str) -> Vec<String> {
+    // --drivers wifi,bluetooth,audio | all | none
+    let spec = spec.trim().to_ascii_lowercase();
+    if spec == "all" {
+        return crate::install::DRIVER_GROUPS
+            .iter()
+            .map(|(g, _)| g.to_string())
+            .collect();
+    }
+    if spec.is_empty() || spec == "none" {
+        return Vec::new();
+    }
+    let known: Vec<&str> = crate::install::DRIVER_GROUPS.iter().map(|(g, _)| *g).collect();
+    spec.split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| known.contains(&s.as_str()))
+        .collect()
+}
+
 fn install_and_report(cfg: &Config) -> i32 {
     let opts = InstallOptions {
         disk: cfg.disk.clone(),
@@ -198,6 +223,7 @@ fn install_and_report(cfg: &Config) -> i32 {
         timezone: cfg.timezone.clone(),
         site_url: cfg.site_url.clone(),
         version: env_version(),
+        drivers: cfg.drivers.clone(),
     };
 
     println!();
@@ -249,6 +275,7 @@ OPTIONS:\n\
   --timezone <tz>      e.g. Europe/Tallinn (default: UTC)\n\
   --site <url>         Enrollment server (default: https://webnotes.work)\n\
   --swap | --no-swap   Create a swap partition (default: swap on)\n\
+  --drivers <list>     Driver groups: wifi,bluetooth,audio | all | none (default: wifi)\n\
   --efi | --bios       Partition layout (default: efi)\n\
   --version <ver>      Version to record\n\
   -h, --help           Show this help\n"

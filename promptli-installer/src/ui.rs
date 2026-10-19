@@ -50,6 +50,7 @@ enum Screen {
     Disk,
     Layout,
     Swap,
+    Drivers,
     Hostname,
     Username,
     Password,
@@ -79,6 +80,7 @@ static MENU: &[MenuItem] = &[
     MenuItem { label: "Disk", desc: "Pick the disk to install to. Its full contents will be erased.", target: Screen::Disk, action: MenuAction::Open },
     MenuItem { label: "Partitioning", desc: "UEFI/GPT (modern machines) or BIOS/MBR (legacy).", target: Screen::Layout, action: MenuAction::Open },
     MenuItem { label: "Swap", desc: "Optional auto-sized swap partition, sized from the disk.", target: Screen::Swap, action: MenuAction::Open },
+    MenuItem { label: "Drivers", desc: "Hardware driver groups: wifi, bluetooth, audio. Deselected groups are removed at install time (offline).", target: Screen::Drivers, action: MenuAction::Open },
     MenuItem { label: "Hostname", desc: "The machine's network name.", target: Screen::Hostname, action: MenuAction::Open },
     MenuItem { label: "Username", desc: "Primary user account (gets sudo).", target: Screen::Username, action: MenuAction::Open },
     MenuItem { label: "Password", desc: "Password for the primary user.", target: Screen::Password, action: MenuAction::Open },
@@ -163,6 +165,7 @@ fn run_loop(terminal: &mut Term, disks: Vec<Disk>) -> io::Result<Option<Config>>
     menu_state.select(Some(0));
     let mut disk_sel = 0usize;
     let mut picker_sel = 0usize;
+    let mut driver_sel = 0usize;
     let mut input = Input::None;
     let mut progress_lines: Vec<String> = Vec::new();
     let mut frames: u64 = 0;
@@ -171,7 +174,7 @@ fn run_loop(terminal: &mut Term, disks: Vec<Disk>) -> io::Result<Option<Config>>
     loop {
         terminal.draw(|f| match screen {
             Screen::Done => draw_done(f, &progress_lines),
-            _ => draw_menu(f, screen, &menu_state, &cfg, &disks, &input, disk_sel, picker_sel),
+            _ => draw_menu(f, screen, &menu_state, &cfg, &disks, &input, disk_sel, picker_sel, driver_sel),
         })?;
         frames += 1;
 
@@ -303,6 +306,28 @@ fn run_loop(terminal: &mut Term, disks: Vec<Disk>) -> io::Result<Option<Config>>
                 KeyCode::Enter => screen = Screen::Menu,
                 _ => {}
             },
+            Screen::Drivers => {
+                match key.code {
+                    KeyCode::Char('q') => return Ok(None),
+                    KeyCode::Esc | KeyCode::Char('h') | KeyCode::Left => screen = Screen::Menu,
+                    KeyCode::Up | KeyCode::Char('k') => driver_sel = driver_sel.saturating_sub(1),
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        if driver_sel + 1 < DRIVER_OPTIONS.len() {
+                            driver_sel += 1;
+                        }
+                    }
+                    KeyCode::Char('y') | KeyCode::Char('n') | KeyCode::Enter => {
+                        let name = DRIVER_OPTIONS[driver_sel];
+                        let has = cfg.drivers.iter().any(|d| d == name);
+                        if has {
+                            cfg.drivers.retain(|d| d != name);
+                        } else {
+                            cfg.drivers.push(name.to_string());
+                        }
+                    }
+                    _ => {}
+                }
+            }
             Screen::Hostname
             | Screen::Username
             | Screen::Password
@@ -415,6 +440,7 @@ fn start_install(terminal: &mut Term, cfg: &mut Config, lines: &mut Vec<String>)
         timezone: cfg.timezone.clone(),
         site_url: cfg.site_url.clone(),
         version: crate::common::distro_version(),
+        drivers: cfg.drivers.clone(),
     };
     let _ = terminal.draw(|f| draw_progress(f, lines));
     let result = crate::install::run_install(&opts, |step| {
@@ -455,6 +481,7 @@ fn draw_menu(
     input: &Input,
     disk_sel: usize,
     picker_sel: usize,
+    driver_sel: usize,
 ) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -477,6 +504,7 @@ fn draw_menu(
         Screen::Disk => draw_disk_select(f, chunks[1], disks, cfg, disk_sel),
         Screen::Layout => draw_layout(f, chunks[1], cfg),
         Screen::Swap => draw_swap(f, chunks[1], cfg),
+        Screen::Drivers => draw_drivers(f, chunks[1], cfg, driver_sel),
         Screen::Hostname => draw_text_prompt(f, chunks[1], "Hostname", cfg, input),
         Screen::Username => draw_text_prompt(f, chunks[1], "Username", cfg, input),
         Screen::Password => draw_text_prompt(f, chunks[1], "Password", cfg, input),
@@ -534,6 +562,10 @@ fn footer_hint(screen: Screen) -> Line<'static> {
         ]),
         Screen::Swap => Line::from(vec![
             key("y/n"), Span::raw(" toggle   "), key("Enter"), Span::raw(" confirm"),
+        ]),
+        Screen::Drivers => Line::from(vec![
+            key("↑/↓"), Span::raw(" select   "), key("y/n"), Span::raw(" toggle   "),
+            key("Enter"), Span::raw(" confirm"),
         ]),
         Screen::Hostname | Screen::Username | Screen::Password | Screen::RootPassword => {
             Line::from(vec![
@@ -730,6 +762,30 @@ fn draw_swap(f: &mut ratatui::Frame, area: Rect, cfg: &Config) {
         Line::from("Recommended for small servers."),
     ];
     f.render_widget(Paragraph::new(text).block(list_block(" Swap ")), area);
+}
+
+/// Driver groups selectable at install time (all shipped in the base image;
+/// deselected groups are purged offline in the chroot).
+const DRIVER_OPTIONS: &[&str] = &["wifi", "bluetooth", "audio"];
+
+fn draw_drivers(f: &mut ratatui::Frame, area: Rect, cfg: &Config, sel: usize) {
+    let mut lines: Vec<Line> = Vec::new();
+    for (i, name) in DRIVER_OPTIONS.iter().enumerate() {
+        let has = cfg.drivers.iter().any(|d| d == name);
+        let mark = if has { "●" } else { "○" };
+        let cursor = if i == sel { "▶ " } else { "  " };
+        let desc = match *name {
+            "wifi" => "wpa_supplicant + iw + firmware (wireless networking)",
+            "bluetooth" => "bluez (Bluetooth adapters)",
+            "audio" => "pipewire + wireplumber + alsa-utils (sound)",
+            _ => "",
+        };
+        lines.push(Line::from(format!("{cursor}{mark} {name:<10} {desc}")));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from("y/n or Enter toggles the selected group. Deselected groups"));
+    lines.push(Line::from("are removed from the installed system (fully offline)."));
+    f.render_widget(Paragraph::new(lines).block(list_block(" Drivers ")), area);
 }
 
 fn draw_text_prompt(f: &mut ratatui::Frame, area: Rect, label: &str, cfg: &Config, input: &Input) {
