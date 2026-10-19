@@ -8,7 +8,7 @@ set -euo pipefail
 
 # Versioning: major is set by hand. Minor counts features/big changes since
 # v1.0.0 (see git history); patch counts every bug fix, however small.
-VERSION="1.28.0"
+VERSION="1.28.1"
 ISO_NAME="promptli-os-${VERSION}-amd64"
 
 echo "================================================"
@@ -313,11 +313,17 @@ usermod -s /bin/bash root 2>/dev/null || true
 sed -i 's|^SHELL=.*|SHELL=/bin/bash|' /etc/default/useradd 2>/dev/null || true
 
 # 4. Mask optional systemd units (faster boot, less idle RAM).
+# NOTE: wpa_supplicant.service is NOT masked here — wifi drivers can be
+# selected at install time and must keep working in FAST mode.
 for unit in apt-daily.timer apt-daily-upgrade.timer man-db.timer \
             systemd-tmpfiles-clean.timer e2scrub_all.timer e2scrub_reap.service \
-            fstrim.timer wpa_supplicant.service ModemManager.service; do
+            fstrim.timer ModemManager.service; do
     ln -sf /dev/null "/etc/systemd/system/$unit"
 done
+# Wifi selected at install time → undo the base image's wpa mask.
+if dpkg -s wpasupplicant >/dev/null 2>&1; then
+    rm -f /etc/systemd/system/wpa_supplicant.service
+fi
 # One getty only (tty1), no fbterm — plain console login.
 mkdir -p /etc/systemd/logind.conf.d
 printf '[Login]\nNAutoVTs=1\n' > /etc/systemd/logind.conf.d/promptli.conf
@@ -413,6 +419,10 @@ for unit in systemd-networkd-wait-online.service NetworkManager-wait-online.serv
             systemd-tmpfiles-clean.timer; do
     ln -sf /dev/null "/etc/systemd/system/$unit"
 done
+# Wifi selected at install time → undo the base image's wpa mask.
+if dpkg -s wpasupplicant >/dev/null 2>&1; then
+    rm -f /etc/systemd/system/wpa_supplicant.service
+fi
 mkdir -p /etc/systemd/logind.conf.d
 printf '[Login]\nNAutoVTs=2\n' > /etc/systemd/logind.conf.d/promptli.conf
 mkdir -p /etc/systemd/system/getty@tty1.service.d

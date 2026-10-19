@@ -34,17 +34,37 @@ pub const DRIVER_GROUPS: &[(&str, &[&str])] = &[
 ];
 
 /// Purge driver groups NOT present in *selected* (offline dpkg in chroot).
+/// For groups that ARE selected, undo the base image's fast-boot masks for
+/// their services (wpa_supplicant is masked by default), so the driver is
+/// actually usable after the install.
 fn apply_drivers(root: &Path, selected: &[String]) {
     for (group, packages) in DRIVER_GROUPS {
-        if selected.iter().any(|d| d == *group) {
+        let keep = selected.iter().any(|d| d == *group);
+        if !keep {
+            let list = packages.join(" ");
+            let script = format!(
+                "dpkg --purge --force-depends {list} 2>/dev/null || true; \
+                 dpkg --purge {list} 2>/dev/null || true"
+            );
+            let _ = run("chroot", &[root.to_str().unwrap_or(""), "/bin/sh", "-c", &script]);
             continue;
         }
-        let list = packages.join(" ");
-        let script = format!(
-            "dpkg --purge --force-depends {list} 2>/dev/null || true; \
-             dpkg --purge {list} 2>/dev/null || true"
-        );
-        let _ = run("chroot", &[root.to_str().unwrap_or(""), "/bin/sh", "-c", &script]);
+        for unit in group_services(group) {
+            let p = root.join("etc/systemd/system").join(unit);
+            // A mask is a symlink to /dev/null; remove it to unmask.
+            if p.is_symlink() || p.exists() {
+                let _ = std::fs::remove_file(&p);
+            }
+        }
+    }
+}
+
+/// systemd units that the base image masks for fast boot, per driver group.
+fn group_services(group: &str) -> &'static [&'static str] {
+    match group {
+        "wifi" => &["wpa_supplicant.service"],
+        "bluetooth" => &["bluetooth.service"],
+        _ => &[],
     }
 }
 

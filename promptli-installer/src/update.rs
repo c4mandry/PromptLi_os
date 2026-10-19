@@ -161,17 +161,18 @@ fn apply_release(version: &str) -> io::Result<()> {
     }
 
     // Update the version in /etc/os-release while preserving the fast/norm
-    // mode suffix (promptli-fast/norm append it to PRETTY_NAME and VERSION).
+    // mode suffix (promptli-fast/norm append it INSIDE the quotes of
+    // PRETTY_NAME and VERSION).
     let _ = proc::run_capture_combined(
         "sh",
         &[
             "-c",
             &format!(
                 "unsquashfs -f -no-progress -d /tmp/promptli-osrel {sq} etc/os-release 2>/dev/null && \
-                 MODE=$(sed -n 's/^PRETTY_NAME=.* (\\(fast\\|norm\\))\"/\\1/p' /etc/os-release | tail -1); \
+                 MODE=$(sed -n 's/^PRETTY_NAME=\".* \\(fast\\|norm\\)\"$/\\1/p' /etc/os-release | tail -1); \
                  cp -f /tmp/promptli-osrel/etc/os-release /etc/os-release; \
                  if [ -n \"$MODE\" ]; then \
-                   sed -i -E \"s|^(PRETTY_NAME=.*)\\|\\1 $MODE\\|; s|^(VERSION=.*)\\|\\1 $MODE\\|\" /etc/os-release; \
+                   sed -i -E 's|^(PRETTY_NAME=\"[^\"]*)|\\1 '\"$MODE\"'|; s|^(VERSION=\"[^\"]*)|\\1 '\"$MODE\"'|' /etc/os-release; \
                  fi; \
                  rm -rf /tmp/promptli-osrel"
             ),

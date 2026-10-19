@@ -78,11 +78,52 @@ PY
 )
 
 echo "→ Uploading $(basename "$ISO") (release id $RELEASE_ID)…"
-curl -sS -o /tmp/promptli-release-upload.json -w "upload HTTP %{http_code}\n" \
-    -X POST \
-    -H "Authorization: token $TOKEN" \
-    -H "Content-Type: application/octet-stream" \
-    --data-binary "@$ISO" \
-    "https://uploads.github.com/repos/$REPO/releases/$RELEASE_ID/assets?name=promptli-os-$VERSION-amd64.iso"
+UPLOADED=""
+for attempt in 1 2 3 4 5; do
+    CODE=$(curl -sS -o /tmp/promptli-release-upload.json -w "%{http_code}" \
+        --connect-timeout 30 --max-time 2400 \
+        --speed-limit 1024 --speed-time 90 \
+        -X POST \
+        -H "Authorization: token $TOKEN" \
+        -H "Content-Type: application/octet-stream" \
+        --data-binary "@$ISO" \
+        "https://uploads.github.com/repos/$REPO/releases/$RELEASE_ID/assets?name=promptli-os-$VERSION-amd64.iso")
+    echo "upload attempt $attempt: HTTP $CODE"
+    if [ "$CODE" = "201" ]; then
+        UPLOADED=1
+        break
+    fi
+    # 422 = an asset with this name already exists — delete it and retry.
+    if [ "$CODE" = "422" ]; then
+        python3 - "$TOKEN" "$REPO" "$RELEASE_ID" "$VERSION" << 'PY'
+import json, sys, urllib.request
 
-echo "✅ Release v$VERSION: https://github.com/$REPO/releases/tag/$TAG"
+token, repo, rel_id, version = sys.argv[1:]
+name = f"promptli-os-{version}-amd64.iso"
+r = urllib.request.Request(
+    f"https://api.github.com/repos/{repo}/releases/{rel_id}/assets?per_page=100",
+    headers={"Authorization": f"token {token}",
+             "Accept": "application/vnd.github+json",
+             "User-Agent": "promptli-release"})
+with urllib.request.urlopen(r) as resp:
+    for a in json.loads(resp.read()):
+        if a["name"] == name:
+            d = urllib.request.Request(
+                f"https://api.github.com/repos/{repo}/releases/assets/{a['id']}",
+                method="DELETE",
+                headers={"Authorization": f"token {token}",
+                         "Accept": "application/vnd.github+json",
+                         "User-Agent": "promptli-release"})
+            with urllib.request.urlopen(d) as dr:
+                print(f"deleted stale asset {a['id']} ({name})", file=sys.stderr)
+PY
+        continue
+    fi
+    sleep 15
+done
+if [ -z "$UPLOADED" ]; then
+    echo "❌ upload failed: $(cat /tmp/promptli-release-upload.json)" >&2
+    exit 1
+fi
+
+echo "✅ Release $TAG: https://github.com/$REPO/releases/tag/$TAG"
