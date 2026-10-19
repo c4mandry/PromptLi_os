@@ -35,11 +35,16 @@ fn main() {
 fn run_update(args: &[String]) -> i32 {
     // promptLi OS updates via the package managers; this is a friendly alias.
     let check = args.iter().any(|a| a == "--check");
+    // Machine state from install time (site URL used for the release layer).
+    let state: Option<crate::common::InstallState> =
+        std::fs::read_to_string("/etc/promptli/install.json")
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok());
 
     let res = if check {
-        update::run_check(None)
+        update::run_check(state)
     } else {
-        update::run_apply(None, "")
+        update::run_apply(state, "")
     };
 
     match res {

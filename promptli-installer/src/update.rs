@@ -11,6 +11,7 @@
 //!   promptli-update --apply   → apt upgrade, AND (if a newer promptLi
 //!                               release exists) download + apply it.
 
+use crate::common::InstallState;
 use crate::proc;
 use std::io;
 
@@ -19,21 +20,26 @@ fn run_apt(args: &[&str]) -> io::Result<i32> {
     Ok(code)
 }
 
-/// Read the configured site URL (from install.json, else the default).
-fn site_url() -> String {
-    crate::common::DEFAULT_SITE_URL.to_string()
+/// Read the configured site URL (from install.json via *state*, else the
+/// default) so machines enrolled against a custom --site keep updating from
+/// that host.
+fn site_url(state: Option<&InstallState>) -> String {
+    match state {
+        Some(s) if !s.site_url.trim().is_empty() => s.site_url.clone(),
+        _ => crate::common::DEFAULT_SITE_URL.to_string(),
+    }
 }
 
 /// Look up the latest promptLi OS version from the website. Returns None when
 /// the endpoint is unreachable (offline → never blocks a plain apt update).
-fn latest_promptli_version() -> Option<String> {
-    let manifest = crate::http_client::fetch_latest(&site_url())?;
+fn latest_promptli_version(state: Option<&InstallState>) -> Option<String> {
+    let manifest = crate::http_client::fetch_latest(&site_url(state))?;
     manifest["version"].as_str().map(|s| s.to_string())
 }
 
 /// Check whether a newer promptLi release exists than the installed version.
-fn newer_release_available() -> Option<(String, String)> {
-    let latest = latest_promptli_version()?;
+fn newer_release_available(state: Option<&InstallState>) -> Option<(String, String)> {
+    let latest = latest_promptli_version(state)?;
     let current = crate::common::distro_version();
     if crate::common::compare_version(&latest, &current) == std::cmp::Ordering::Greater {
         Some((latest, current))
@@ -42,7 +48,7 @@ fn newer_release_available() -> Option<(String, String)> {
     }
 }
 
-pub fn run_check(_state: Option<crate::common::InstallState>) -> io::Result<i32> {
+pub fn run_check(state: Option<InstallState>) -> io::Result<i32> {
     println!("Checking for package updates (apt-get update) ...");
     let code = run_apt(&["update"])?;
     if code != 0 {
@@ -67,7 +73,7 @@ pub fn run_check(_state: Option<crate::common::InstallState>) -> io::Result<i32>
     }
 
     // Report a newer promptLi release, best-effort (offline → silent).
-    match newer_release_available() {
+    match newer_release_available(state.as_ref()) {
         Some((latest, current)) => {
             println!();
             println!("A newer promptLi OS release is available: {latest} (installed {current}).");
@@ -78,17 +84,17 @@ pub fn run_check(_state: Option<crate::common::InstallState>) -> io::Result<i32>
     Ok(0)
 }
 
-pub fn run_apply(_state: Option<crate::common::InstallState>, _dest: &str) -> io::Result<i32> {
+pub fn run_apply(state: Option<InstallState>, _dest: &str) -> io::Result<i32> {
     // 1. apt upgrade first (the base Debian packages).
     println!("Updating promptLi OS (apt-get upgrade) ...");
     let code = run_apt(&["upgrade", "-y"])?;
 
     // 2. Then the promptLi release layer, if a newer release exists.
-    match newer_release_available() {
+    match newer_release_available(state.as_ref()) {
         Some((latest, current)) => {
             println!();
             println!("Upgrading promptLi OS {current} -> {latest} ...");
-            let r = apply_release(&latest);
+            let r = apply_release(&latest, &site_url(state.as_ref()));
             if code == 0 {
                 if let Err(e) = r {
                     eprintln!("warning: promptLi release upgrade failed: {e}");
@@ -116,12 +122,11 @@ pub fn run_apply(_state: Option<crate::common::InstallState>, _dest: &str) -> io
 /// and the os-release version) are copied over the running system — the
 /// same "restore from ISO" path promptli-norm uses. This never repartitions
 /// or touches the bootloader; it only refreshes the promptLi layer.
-fn apply_release(version: &str) -> io::Result<()> {
+fn apply_release(version: &str, site: &str) -> io::Result<()> {
     let iso = "/var/tmp/promptli-update.iso";
     let mnt = "/var/tmp/promptli-update-mnt";
 
     println!("Downloading promptLi OS {version} ISO ...");
-    let site = site_url();
     let iso_path = format!("{}/api/os/iso", site);
     let dl = proc::run_capture_combined(
         "sh",
@@ -146,7 +151,9 @@ fn apply_release(version: &str) -> io::Result<()> {
     // /etc/os-release is handled separately below so the fast/norm mode
     // suffix survives the upgrade.
     let paths = "opt/aido opt/promptli etc/fastfetch etc/skel etc/zsh \
-                 etc/profile.d/promptli-version.sh usr/local/bin/aido usr/local/bin/pacman \
+                 etc/promptli/autostart.d \
+                 etc/profile.d/promptli-version.sh etc/profile.d/promptli-path.sh \
+                 usr/local/bin/aido usr/local/bin/pacman \
                  usr/local/bin/promptli usr/local/bin/promptli-term usr/local/bin/promptli-kb \
                  usr/local/bin/promptli-fast usr/local/bin/promptli-norm \
                  usr/local/bin/promptli-install usr/local/bin/promptli-update \
