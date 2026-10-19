@@ -1141,6 +1141,15 @@ DEBIAN_FRONTEND=noninteractive apt-get purge -y -qq \
 apt-get autoremove -y -qq 2>/dev/null || true
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
     dbus-broker systemd-resolved 2>/dev/null || true
+# The dbus purge above also removed the driver-group packages that hard-
+# depend on dbus (bluez, wireplumber, pipewire-pulse). Reinstall them so the
+# installer's offline driver selection actually has them to keep. bluez pulls
+# the `dbus` package back as a dependency — that's fine: the dbus.service
+# symlink below still points at dbus-broker, so the heavyweight dbus-daemon
+# never runs (binaries on disk only, zero RAM cost).
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+    bluez wireplumber pipewire pipewire-pulse alsa-utils 2>/dev/null || true
+apt-mark manual bluez wireplumber pipewire pipewire-pulse alsa-utils 2>/dev/null || true
 
 # ── Console keymap/font data must survive autoremove ────────
 # `kbd` (the kernel keymap files in /usr/share/keymaps/i386) and console-setup
