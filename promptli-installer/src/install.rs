@@ -321,7 +321,7 @@ fn write_keymap(root: &Path, keymap: &str) -> io::Result<()> {
              d /run/lock 1777 root root -\n\
              L+ /etc/mtab - - - - ../proc/self/mounts\n\
              L+ /etc/default/locale - - - - ../locale.conf\n\
-             f /etc/vconsole.conf 0644 root root - KEYMAP=us\nFONT=Lat2-Terminus16\n\n"
+             f /etc/vconsole.conf 0644 root root - KEYMAP=us\nFONT=Uni2-Terminus16\n\n"
         ),
     )?;
     Ok(())

@@ -27,7 +27,7 @@ echo ""
 # NOTE: /tmp on this host is a tmpfs mounted with 'nodev', which breaks
 # device-node creation inside the chroot (debootstrap/dpkg need /dev/null,
 # /dev/pts, etc.). Build under a real filesystem (/ is ext4) instead.
-BUILD_DIR="/var/tmp/promptli-build"
+BUILD_DIR="/var/tmp/promptli-build-${VERSION}"
 OUTPUT_DIR="${PROMPTLI_OUTPUT_DIR:-$HOME/promptli-os-output}"
 
 # Absolute path of this repo — captured BEFORE any `cd` so the build can
