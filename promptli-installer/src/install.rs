@@ -68,6 +68,41 @@ fn group_services(group: &str) -> &'static [&'static str] {
     }
 }
 
+/// Fresh installs are NORM mode: drop the marker file and append ` norm`
+/// (inside the quotes) to PRETTY_NAME/VERSION in /etc/os-release so
+/// fastfetch shows "promptLi OS X.Y.Z (L1-433) norm". promptli-fast swaps
+/// this for ` fast` (and removes the marker); promptli-norm restores it.
+fn mark_norm_mode(root: &Path) {
+    let marker = root.join("etc/promptli/norm");
+    if let Some(parent) = marker.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(&marker, "norm\n");
+
+    let osrel = root.join("etc/os-release");
+    let Ok(content) = std::fs::read_to_string(&osrel) else {
+        return;
+    };
+    let mut out = String::new();
+    for line in content.lines() {
+        if let Some(key) = ["PRETTY_NAME", "VERSION"]
+            .iter()
+            .find(|k| line.starts_with(&format!("{k}=")))
+        {
+            let mut val = line.splitn(2, '=').nth(1).unwrap_or("").trim().to_string();
+            val = val.trim_matches('"').to_string();
+            for suffix in [" fast", " norm"] {
+                val = val.strip_suffix(suffix).map(|s| s.to_string()).unwrap_or(val);
+            }
+            out.push_str(&format!("{key}=\"{val} norm\"\n"));
+        } else {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    let _ = std::fs::write(&osrel, out);
+}
+
 /// Find the live squashfs/rootfs on this running system.
 pub fn find_live_root() -> io::Result<PathBuf> {
     for p in LIVE_SQUASHFS_PATHS {
@@ -154,6 +189,10 @@ pub fn run_install(
     // ── Hardware drivers (offline; purge deselected groups) ──
     progress("Applying driver selection");
     apply_drivers(target_dir, &opts.drivers);
+
+    // ── Fresh installs are NORM mode (fastfetch shows it) ──
+    progress("Marking NORM mode");
+    mark_norm_mode(target_dir);
 
     // ── Bootloader ────────────────────────────────────────
     progress("Installing bootloader");

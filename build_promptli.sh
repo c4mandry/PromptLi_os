@@ -340,6 +340,7 @@ for KEY in PRETTY_NAME VERSION; do
     sed -i -E "s|^${KEY}=.*$|${KEY}=\"${BASE} fast\"|" /etc/os-release
 done
 touch /etc/promptli/fast
+rm -f /etc/promptli/norm
 
 echo ""
 echo "✅ FAST mode active — aido, zsh, python tools, docs removed;"
@@ -436,6 +437,7 @@ printf '[Journal]\nRuntimeMaxUse=16M\nRuntimeMaxFileSize=8M\nSystemMaxUse=64M\n'
 
 # 5. Mode marker + os-release (idempotent; repairs broken suffixes).
 rm -f /etc/promptli/fast
+touch /etc/promptli/norm
 for KEY in PRETTY_NAME VERSION; do
     BASE=$(sed -n -E "s/^${KEY}=\"([^\"]*)\".*/\\1/p" /etc/os-release)
     BASE=${BASE%% fast}; BASE=${BASE%% norm}
