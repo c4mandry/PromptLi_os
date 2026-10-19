@@ -92,6 +92,11 @@ class ChatTui:
         self.busy = False
         self.status = "Type a request, or /help for commands"
         self.confirming: dict | None = None
+        # Sudo mode (Shift+S): stores the user's sudo password in memory so
+        # run_command can run freely as root; never written to disk.
+        self.sudo_on = False
+        self.password_mode = False
+        self.password_buf = ""
         self.quit = False
         self.exit_code = 0
         self.worker: Any = None
@@ -102,6 +107,11 @@ class ChatTui:
         self.events.put(("token", token))
 
     def _on_confirm(self, name: str, arguments: dict) -> bool:
+        # Sudo mode ON = the user has pre-authorized privileged commands:
+        # run_command is auto-approved so aido can use the sudo password freely.
+        if self.sudo_on and name == "run_command":
+            self.events.put(("sysmsg", f"⚙ {name} {arguments} — auto-approved (sudo mode)"))
+            return True
         self.events.put(("confirm", name, arguments))
         return bool(self.confirm_results.get())
 
@@ -146,6 +156,8 @@ class ChatTui:
                     "/tools  list what AIDO can do   /model  which model + API key status\n"
                     "/exit   quit\n"
                     "\n"
+                    "Shift+S  toggle sudo mode — AIDO can then run commands as root\n"
+                    "         (asks for your sudo password once; kept in memory only).\n"
                     "Up/Down arrow = scroll, Enter = send. Ctrl+C twice or Ctrl+D = quit."
                 ),
             })
@@ -183,6 +195,8 @@ class ChatTui:
         kind = ev[0]
         if kind == "token":
             self.messages[-1]["text"] += ev[1]
+        elif kind == "sysmsg":
+            self.messages.append({"role": "sys", "text": ev[1]})
         elif kind == "done":
             result = ev[1]
             if not self.messages[-1]["text"]:
@@ -227,7 +241,44 @@ class ChatTui:
                     return True
             return True
 
+        # Sudo-password entry mode (after Shift+S): masked input.
+        if self.password_mode:
+            if isinstance(ch, str):
+                if ch in ("\n", "\r"):  # commit
+                    if self.password_buf:
+                        self.agent.sudo["password"] = self.password_buf
+                        self.sudo_on = True
+                        self.status = "SUDO: ON — commands run as root (Shift+S to turn off)"
+                    else:
+                        self.status = "sudo mode cancelled (empty password)"
+                    self.password_mode = False
+                    self.password_buf = ""
+                    return True
+                if ch == "\x1b":  # Esc cancels
+                    self.password_mode = False
+                    self.password_buf = ""
+                    self.status = "sudo mode cancelled"
+                    return True
+                if ch in ("\x7f", "\x08"):
+                    self.password_buf = self.password_buf[:-1]
+                    return True
+                if ch.isprintable() and len(self.password_buf) < 200:
+                    self.password_buf += ch
+                    return True
+            return True
+
         if isinstance(ch, str):
+            if ch == "S":  # Shift+S toggles sudo mode
+                if self.sudo_on:
+                    self.agent.sudo["password"] = None
+                    self.sudo_on = False
+                    self.status = "SUDO: OFF"
+                    self.messages.append({"role": "sys", "text": "sudo mode OFF — commands run as your user again."})
+                else:
+                    self.password_mode = True
+                    self.password_buf = ""
+                    self.status = "enter your sudo password (Esc cancels):"
+                return True
             if ch in ("\n", "\r"):  # Enter (LF/CR both arrive depending on terminal)
                 self._send(self.input_buf)
                 self.input_buf = ""
@@ -308,6 +359,8 @@ class ChatTui:
             return
 
         header = f" AIDO — {self.model_name} "
+        if self.sudo_on:
+            header += "[SUDO:ON] "
         busy = " ●" if self.busy else ""
         right = f"/help  Ctrl+C quit{busy}"
         stdscr.addstr(0, 0, header.ljust(w)[:w], _attr(_C_HEADER) | curses.A_BOLD)
@@ -329,13 +382,22 @@ class ChatTui:
             stdscr.addstr(h - 2, 0, self.status[:w], _attr(_C_SYS))
 
         # Input line
-        label = "You> "
-        shown = self.input_buf
-        avail = w - len(label) - 2
-        if len(shown) > avail:
-            shown = shown[-avail:]
-        stdscr.addstr(h - 1, 0, label, _attr(_C_USER) | curses.A_BOLD)
-        stdscr.addstr(h - 1, len(label), shown + "▌", _attr(_C_USER))
+        if self.password_mode:
+            label = "sudo password> "
+            shown = "*" * len(self.password_buf)
+            avail = w - len(label) - 2
+            if len(shown) > avail:
+                shown = shown[-avail:]
+            stdscr.addstr(h - 1, 0, label, _attr(_C_ERR) | curses.A_BOLD)
+            stdscr.addstr(h - 1, len(label), shown + "▌", _attr(_C_ERR))
+        else:
+            label = "You> "
+            shown = self.input_buf
+            avail = w - len(label) - 2
+            if len(shown) > avail:
+                shown = shown[-avail:]
+            stdscr.addstr(h - 1, 0, label, _attr(_C_USER) | curses.A_BOLD)
+            stdscr.addstr(h - 1, len(label), shown + "▌", _attr(_C_USER))
         stdscr.refresh()
 
     def _main(self, stdscr: Any) -> int:

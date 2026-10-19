@@ -24,7 +24,7 @@ import utils
 
 logger = logging.getLogger("aido.agent")
 
-SYSTEM_PROMPT = """You are AIDO (AI Desktop Operator), a helpful assistant that controls a Linux desktop computer.
+SYSTEM_PROMPT = """You are AIDO (AI Desktop Operator), a helpful assistant that controls a Linux computer.
 
 Available tools:
 {tools}
@@ -37,6 +37,7 @@ Rules:
 - Use the exact file paths and names from the user's message when calling tools.
 - Prefer actually performing the requested action over describing it.
 - Base your answer on the tool results you receive; do not invent facts.
+- Use run_command to execute shell commands the user asks for (installing packages, checking status, editing system files, …). When the tool result shows \"sudo\": true, you ran with root privileges.
 - For destructive actions (closing windows, killing processes) the system may ask the user first.
 """
 
@@ -51,8 +52,12 @@ def format_tool_schemas(registry: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def build_tools(config: dict[str, Any]) -> dict[str, Any]:
-    """Bind config-provided defaults (safety, web settings) to tool functions."""
+def build_tools(config: dict[str, Any], sudo_ctx: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Bind config-provided defaults (safety, web settings) to tool functions.
+
+    *sudo_ctx* is a mutable dict shared with the TUI: when its 'password'
+    entry is set (Shift+S sudo mode), run_command executes through sudo.
+    """
     safety = config.get("safety", {})
     web = config.get("web", {})
     allowed_dirs = safety.get("allowed_dirs") or ["~"]
@@ -75,6 +80,8 @@ def build_tools(config: dict[str, Any]) -> dict[str, Any]:
             )
         elif name in file_tools:
             bound[name] = partial(fn, allowed_dirs=allowed_dirs)
+        elif name == "run_command":
+            bound[name] = partial(fn, sudo_ctx=sudo_ctx)
         elif name == "browse_page":
             bound[name] = partial(fn, headless=web.get("browser_headless", True))
         elif name == "download_file":
@@ -108,7 +115,10 @@ class Agent:
         installs a dialog-based one)."""
         self.config = config or {}
         self.confirm = confirm
-        self.tools = build_tools(self.config)
+        # Sudo context shared with the TUI: Shift+S puts the user's sudo
+        # password here (in memory only) so run_command can use sudo freely.
+        self.sudo: dict[str, Any] = {"password": None}
+        self.tools = build_tools(self.config, sudo_ctx=self.sudo)
         self.dangerous = {tool["name"] for tool in tools.TOOL_REGISTRY if tool.get("dangerous")}
         agent_cfg = self.config.get("agent", {})
         self.max_iterations = int(agent_cfg.get("max_tool_iterations", 5))

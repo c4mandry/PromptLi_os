@@ -8,7 +8,7 @@ set -euo pipefail
 
 # Versioning: major is set by hand. Minor counts features/big changes since
 # v1.0.0 (see git history); patch counts every bug fix, however small.
-VERSION="1.24.1"
+VERSION="1.25.0"
 ISO_NAME="promptli-os-${VERSION}-amd64"
 
 echo "================================================"
@@ -286,6 +286,7 @@ apt-get clean -qq 2>/dev/null || true
 
 # 2. Remove the AI assistant + python-based extras.
 rm -rf /opt/aido /opt/promptli/tools /opt/promptli/promptli-wallpaper.py
+rm -rf /usr/share/oh-my-zsh /usr/local/bin/starship
 rm -f /usr/local/bin/aido /usr/local/bin/promptli /usr/local/bin/locakhost /usr/local/bin/promptli-term
 rm -f /etc/skel/.fbtermrc /root/.fbtermrc 2>/dev/null
 
@@ -370,9 +371,11 @@ if [ -n "$SQS" ]; then
     unsquashfs -f -no-progress -d / "$SQS" \
         opt/aido opt/promptli/tools \
         usr/local/bin/aido usr/local/bin/locakhost usr/local/bin/promptli \
-        usr/local/bin/promptli-term 2>/dev/null || true
+        usr/local/bin/promptli-term usr/local/bin/promptli-kb \
+        usr/local/bin/starship usr/share/oh-my-zsh 2>/dev/null || true
     chmod +x /usr/local/bin/aido /usr/local/bin/locakhost \
-        /usr/local/bin/promptli /usr/local/bin/promptli-term 2>/dev/null || true
+        /usr/local/bin/promptli /usr/local/bin/promptli-term \
+        /usr/local/bin/promptli-kb /usr/local/bin/starship 2>/dev/null || true
 fi
 umount /var/tmp/pl-iso-mnt 2>/dev/null || true
 rm -rf /var/tmp/pl-iso-mnt /var/tmp/promptli-restore.iso
@@ -621,18 +624,19 @@ X
 mkdir -p "$INCLUDES/etc/fastfetch" "$INCLUDES/etc/skel/.config/fastfetch"
 cat > "$INCLUDES/etc/fastfetch/config.jsonc" << 'X'
 // promptLi OS fastfetch config — custom logo + clean output.
-// Pure-ASCII logo: block characters (█▓▒░) render on EVERY terminal including
-// the plain Linux console, where the old braille glyphs showed as empty boxes.
+// Monochrome logo: fastfetch 2.40 defaults a `data` logo to the fallback
+// (unknown) OS logo's colors, so we pin color 1 to the terminal default and
+// disable bold (brightColor) — the art renders in plain foreground color.
 {
     "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
     "logo": {
         "type": "data",
-        "source": "           ██     ██   \n          ████   ████  \n         ██████ ██████  \n        ████████████████ \n        ██████  ████████ \n        █████   ████████  \n         ████    ██████   \n          ██      ████    \n                    ███    \n                    ███    \n                    ███    \n                    ███    \n                    ██     ",
+        "source": "⠀⠀⠀⠀⠀⢀⣠⣤⣶⣶⣿⣿⣿⣶⣶⣤⡀⠀⠀⠀⠀\n⠀⠀⠀⠀⣴⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣦⡀⠀⠀\n⠀⠀⠀⣼⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣧⠀⠀\n⠀⠀⢠⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡄⠀\n⠀⠀⢸⣿⣿⣿⣿⣿⡏⢸⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇⠀\n⠀⠀⠘⣿⣿⣟⡿⢿⣷⢸⠞⠛⢽⣾⣛⡟⣿⣿⣿⠁⠀\n⠀⠀⠀⠻⣿⡟⢶⡿⡿⠀⠀⠀⠀⠹⠯⠏⢸⣿⣿⠀⠀\n⠀⠀⠀⠀⠛⣾⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣼⣿⡏⠀⠀\n⠀⠀⠀⠀⠀⣿⣿⣄⠀⠀⠈⠍⠀⠀⢀⣼⣿⣿⡇⠀⠀\n⠀⠀⠀⠀⠀⠈⠀⠘⢉⠖⠠⠤⠤⠀⠈⡌⣿⡏⠀⠀⠀\n⠀⠀⠀⠀⠀⢀⡠⠔⠊⠀⠀⠀⠀⠀⠀⠈⣿⡀⠀⠀⠀\n⠀⡠⠂⠉⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣿⠈⠁⠂⢄\n⢰⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠘⣆⠀⠀⠈",
         "padding": { "left": 2 },
         "color": { "1": "default" }
     },
     "display": {
-        "separator": " -> ",
+        "separator": " ➜ ",
         "brightColor": false
     },
     "modules": [
@@ -654,87 +658,113 @@ cat > "$INCLUDES/etc/fastfetch/config.jsonc" << 'X'
 X
 cp "$INCLUDES/etc/fastfetch/config.jsonc" "$INCLUDES/etc/skel/.config/fastfetch/config.jsonc"
 
-# ── zsh: global config + per-user skel (looks good on old terminals) ──
+# ── zsh: Robert's config (envaouros2026) + promptLi additions ──
+# Oh My Zsh + agnoster (black & white override) + starship on real terminals;
+# the plain Linux console (TERM=linux) falls back to a clean ASCII prompt so
+# powerline glyphs never render as boxes at the physical login screen.
 mkdir -p "$INCLUDES/etc/zsh" "$INCLUDES/etc/skel"
 cat > "$INCLUDES/etc/zsh/zshrc" << 'X'
-# promptLi OS — system-wide zsh configuration.
-# Works on 8-color and 256-color terminals alike (no truecolor required).
+# promptLi OS — zsh config from c4mandry/envaouros2026 (Oh My Zsh + agnoster
+# B&W + starship), with promptLi additions (sbin PATH, autostart, fzf/zoxide)
+# and a TERM=linux fallback prompt for the plain console.
 
-# ── PATH ──────────────────────────────────────────────────
-# promptLi is server-focused: make admin tools (swapon, fdisk, ip, …)
-# reachable without typing the full /usr/sbin path, Arch-style.
-# (Guarded: /etc/profile.d/promptli-path.sh may already have added them.)
+# --- PERFORMANCE OPTIMIZATIONS ---
+DISABLE_AUTO_UPDATE="true"
+DISABLE_MAGIC_FUNCTIONS="true"
+ZSH_DISABLE_COMPFIX="true"
+
+# Cache completions aggressively
+autoload -Uz compinit
+if [ -f ~/.zcompdump ] && [ "$(date +'%j')" = "$(date -r ~/.zcompdump +'%j')" ]; then
+    compinit -C
+else
+    compinit
+fi
+
+# --- PATH CONFIGURATION ---
+export PATH="$HOME/bin:$HOME/.local/bin:/usr/local/bin:$PATH"
+# promptLi: admin tools on the PATH (guarded against duplicates).
 case ":$PATH:" in
     *:/usr/local/sbin:*) ;;
-    *) path=(/usr/local/sbin /usr/sbin /sbin $path) ;;
+    *) export PATH="/usr/local/sbin:/usr/sbin:/sbin:$PATH" ;;
 esac
 
-# ── History ──────────────────────────────────────────────
+# --- OH MY ZSH SETUP ---
+export ZSH="/usr/share/oh-my-zsh"
+
+# Set ZSH_THEME to empty on the plain Linux console (powerline glyphs have
+# no font there); agnoster everywhere else (real terminal emulators).
+if [[ "$TERM" == "linux" ]]; then
+    ZSH_THEME=""
+else
+    ZSH_THEME="agnoster"
+fi
+
+# --- PLUGINS (syntax highlighting must be last) ---
+plugins=(
+  git
+  zsh-autosuggestions
+  zsh-syntax-highlighting
+)
+
+if [ -f "$ZSH/oh-my-zsh.sh" ]; then
+    source "$ZSH/oh-my-zsh.sh"
+fi
+
+# --- AUTOSUGGEST SETTINGS ---
+ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE="fg=#666666"
+ZSH_AUTOSUGGEST_BUFFER_MAX_SIZE="20"
+ZSH_AUTOSUGGEST_USE_ASYNC=1
+
+# --- SHELL OPTIONS ---
+setopt AUTO_CD              # Type a directory name to cd into it directly
+setopt AUTO_PUSHD           # Push visited dirs to stack
+setopt PUSHD_IGNORE_DUPS    # Don't store duplicate dirs in stack
+setopt HIST_IGNORE_ALL_DUPS # Don't record duplicate commands in history
+setopt HIST_SAVE_NO_DUPS    # Don't write duplicate commands to history file
+setopt HIST_REDUCE_BLANKS   # Remove superfluous blanks from history items
+setopt SHARE_HISTORY        # Share history across all active zsh terminals
+
+# History configuration
 HISTFILE=~/.zsh_history
 HISTSIZE=10000
 SAVEHIST=10000
-setopt INC_APPEND_HISTORY SHARE_HISTORY EXTENDED_HISTORY HIST_IGNORE_DUPS
 
-# ── Completion ───────────────────────────────────────────
-autoload -Uz compinit && compinit -d ~/.zcompdump
-zstyle ':completion:*' menu select
-zstyle ':completion:*' matcher-list 'm:{a-zA-Z}={A-Za-z}'
-setopt AUTO_LIST AUTO_MENU COMPLETE_IN_WORD
+# Fix Space key behavior completely
+bindkey " " self-insert
+bindkey -M emacs " " self-insert
+bindkey -M viins " " self-insert
 
-# ── Editing niceties ─────────────────────────────────────
-setopt AUTO_CD CORRECT INTERACTIVE_COMMENTS
-autoload -Uz edit-command-line
-zle -N edit-command-line
-bindkey '^X^E' edit-command-line
+# --- LAZY LOAD SSH AGENT ---
+function _load_ssh_agent() {
+    if [ -z "$SSH_AUTH_SOCK" ]; then
+        eval "$(ssh-agent -s)" > /dev/null
+        ssh-add 2>/dev/null
+    fi
+}
+autoload -U add-zsh-hook
+add-zsh-hook precmd _load_ssh_agent
 
-# ── Prompt ───────────────────────────────────────────────
-# Two variants:
-#  - plain Linux console (TERM=linux): pure ASCII so nothing renders as a
-#    box in the kernel console font, and cell spacing is perfect.
-#  - real terminal emulators: a bit fancier (git branch, ⚡/❯ glyphs).
-autoload -Uz vcs_info
-precmd() { vcs_info }
-zstyle ':vcs_info:git:*' formats '(%b)'
-zstyle ':vcs_info:*' enable git
-setopt PROMPT_SUBST
-if [[ "$TERM" == "linux" ]]; then
-    PROMPT='%B%F{green}%n@%m%f%b:%F{cyan}%~%f%F{yellow}${vcs_info_msg_0_}%f%(!.%F{red}#%f.%F{green}$%f) '
-else
-    PROMPT='%B%F{magenta}⚡%f%b %B%F{cyan}%~%f%b %F{yellow}${vcs_info_msg_0_}%f%(!.%F{red}%n@%m.%F{green}❯)%f '
-fi
+# --- USEFUL ALIASES ---
+alias ..="cd .."
+alias ...="cd ../.."
+alias ....="cd ../../.."
+alias ls="ls --color=auto"
+alias ll="ls -l"
+alias la="ls -la"
+alias grep="grep --color=auto"
 
-# ── Aliases (modern tools) ───────────────────────────────
-# NOTE: cat stays plain cat — a `cat='batcat ... || cat'` alias recurses in
-# zsh (the trailing word is the alias itself) and wedges the line editor.
-# bat is available as `bat` if you want syntax-highlighted output.
-alias ls='eza --icons=never --color=auto --group-directories-first'
-alias ll='eza -lh --icons=never --color=auto --group-directories-first'
-alias la='eza -lah --icons=never --color=auto --group-directories-first'
-alias bat='batcat --paging=never --style=plain'
-alias grep='grep --color=auto'
-alias tree='eza --tree --icons=never'
-alias mkdir='mkdir -pv'
-alias df='df -h'
-alias free='free -h'
+# Reload configuration quickly
+alias reload="source ~/.zshrc"
 
-# ── Keybindings ──────────────────────────────────────────
-bindkey '^[[A' up-line-or-search
-bindkey '^[[B' down-line-or-search
-bindkey '^R' history-incremental-search-backward
+# --- SOURCE GLOBAL ALIASES LAST ---
+[ -f ~/.zsh_aliases ] && source ~/.zsh_aliases
 
-# ── Plugin setup (Debian packages) ───────────────────────
-source /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh 2>/dev/null
-source /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh 2>/dev/null
-ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=8'
-
-# ── Normal console look ──────────────────────────────────
-# promptLi OS logs you into the plain Linux console (perfect character
-# spacing, the look every Linux user knows). promptli-term switches the
-# console to UTF-8 + a Unicode font for the logo and Unicode text.
-
-# ── promptLi autostart (sourced once per login shell) ────
+# --- promptLi autostart (sourced once per login shell) ---
 # Drop executable scripts in /etc/promptli/autostart.d/ (system-wide) or
 # ~/.config/promptli/autostart.d/ (user) — they run in zsh login shells.
+# (fastfetch runs from here; the envaouros2026 bare `fastfetch` call is
+# covered by this to avoid double-printing.)
 if [[ -o login && -z "$PROMPTLI_AUTOSTART_RAN" ]]; then
     export PROMPTLI_AUTOSTART_RAN=1
     for f in /etc/promptli/autostart.d/*(N.x) ~/.config/promptli/autostart.d/*(N.x); do
@@ -742,15 +772,81 @@ if [[ -o login && -z "$PROMPTLI_AUTOSTART_RAN" ]]; then
     done
 fi
 
-# ── fzf + zoxide ─────────────────────────────────────────
+# --- fzf + zoxide (promptLi extras) ---
 if command -v zoxide >/dev/null 2>&1; then
     eval "$(zoxide init zsh)"
 fi
 if command -v fzf >/dev/null 2>&1; then
     source /usr/share/doc/fzf/examples/key-bindings.zsh 2>/dev/null
 fi
+
+# --- Force Agnoster theme into Black & White (real terminals only) ---
+if [[ "$TERM" != "linux" ]]; then
+    prompt_segment() {
+      local bg fg
+      [[ -n $1 ]] && bg="%K{$1}" || bg="%k"
+      [[ -n $2 ]] && fg="%F{$2}" || fg="%f"
+      if [[ $CURRENT_BG != 'NONE' && $1 != $CURRENT_BG ]]; then
+        echo -n " %{$bg%F{$CURRENT_BG}%}$SEGMENT_SEPARATOR%{$fg%} "
+      else
+        echo -n "%{$bg$fg%} "
+      fi
+      CURRENT_BG=$1
+      [[ -n $3 ]] && echo -n "$3"
+    }
+
+    # Override segment colors to dark grey, mid grey, white
+    AGNOSTER_CONTEXT_BG="235"
+    AGNOSTER_CONTEXT_FG="white"
+    AGNOSTER_DIR_BG="238"
+    AGNOSTER_DIR_FG="white"
+    AGNOSTER_GIT_BG="242"
+    AGNOSTER_GIT_FG="black"
+
+    if command -v starship >/dev/null 2>&1; then
+        eval "$(starship init zsh)"
+    fi
+fi
+
+# --- Plain-console prompt (TERM=linux): pure ASCII, perfect spacing ---
+if [[ "$TERM" == "linux" ]]; then
+    autoload -Uz vcs_info
+    precmd() { vcs_info }
+    zstyle ':vcs_info:git:*' formats '(%b)'
+    zstyle ':vcs_info:*' enable git
+    setopt PROMPT_SUBST
+    PROMPT='%B%F{green}%n@%m%f%b:%F{cyan}%~%f%F{yellow}${vcs_info_msg_0_}%f%(!.%F{red}#%f.%F{green}$%f) '
+fi
+
+# --- RED STDERR: error messages print in red, normal output untouched ---
+if [[ -t 2 && "$TERM" != "dumb" ]]; then
+  exec 2> >(while IFS= read -r line; do printf '\033[31m%s\033[0m\n' "$line"; done)
+fi
 X
 cp "$INCLUDES/etc/zsh/zshrc" "$INCLUDES/etc/skel/.zshrc"
+
+# ── Oh My Zsh + plugins + starship (system-wide) ─────────
+# Robert's config expects $ZSH=/usr/share/oh-my-zsh with the git plugin
+# (bundled) and zsh-autosuggestions + zsh-syntax-highlighting under
+# custom/plugins. starship is fetched from its GitHub releases.
+echo "  [*] Installing Oh My Zsh + plugins + starship..."
+if [ ! -d "$INCLUDES/usr/share/oh-my-zsh" ]; then
+    git clone --depth 1 https://github.com/ohmyzsh/ohmyzsh.git "$INCLUDES/usr/share/oh-my-zsh" 2>/dev/null         || { echo "  [!] oh-my-zsh clone failed (network?)"; rm -rf "$INCLUDES/usr/share/oh-my-zsh"; }
+fi
+if [ -d "$INCLUDES/usr/share/oh-my-zsh" ]; then
+    mkdir -p "$INCLUDES/usr/share/oh-my-zsh/custom/plugins"
+    [ -d "$INCLUDES/usr/share/oh-my-zsh/custom/plugins/zsh-autosuggestions" ] ||         git clone --depth 1 https://github.com/zsh-users/zsh-autosuggestions.git             "$INCLUDES/usr/share/oh-my-zsh/custom/plugins/zsh-autosuggestions" 2>/dev/null || true
+    [ -d "$INCLUDES/usr/share/oh-my-zsh/custom/plugins/zsh-syntax-highlighting" ] ||         git clone --depth 1 https://github.com/zsh-users/zsh-syntax-highlighting.git             "$INCLUDES/usr/share/oh-my-zsh/custom/plugins/zsh-syntax-highlighting" 2>/dev/null || true
+    echo "  [✓] Oh My Zsh installed"
+else
+    echo "  [!] Oh My Zsh unavailable — zshrc falls back gracefully"
+fi
+if [ ! -f "$INCLUDES/usr/local/bin/starship" ]; then
+    STARSHIP_TARBALL="$BUILD_DIR/starship.tar.gz"
+    wget -q --timeout=60 -O "$STARSHIP_TARBALL"         "https://github.com/starship/starship/releases/latest/download/starship-x86_64-unknown-linux-musl.tar.gz" 2>/dev/null         && tar -xzf "$STARSHIP_TARBALL" -C "$INCLUDES/usr/local/bin" starship 2>/dev/null         && chmod +x "$INCLUDES/usr/local/bin/starship"         && echo "  [✓] starship installed"         || echo "  [!] starship download failed (network?)"
+    rm -f "$STARSHIP_TARBALL"
+fi
+
 
 # ── promptli-term: plain-console enhancer ────────────────
 # fbterm is NOT used anywhere: its keyboard input is broken on modern

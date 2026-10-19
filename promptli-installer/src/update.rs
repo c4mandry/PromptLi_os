@@ -148,7 +148,8 @@ fn apply_release(version: &str) -> io::Result<()> {
                  usr/local/bin/promptli usr/local/bin/promptli-term usr/local/bin/promptli-kb \
                  usr/local/bin/promptli-fast usr/local/bin/promptli-norm \
                  usr/local/bin/promptli-install usr/local/bin/promptli-update \
-                 usr/local/bin/promptli-getty usr/local/bin/locakhost";
+                 usr/local/bin/promptli-getty usr/local/bin/locakhost \
+                 usr/local/bin/starship usr/share/oh-my-zsh";
     let out = proc::run_capture_combined(
         "sh",
         &["-c", &format!("unsquashfs -f -no-progress -d / {sq} {paths} 2>&1")],

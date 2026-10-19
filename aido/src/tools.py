@@ -634,6 +634,45 @@ def browse_page(url: str, headless: bool = True, timeout: int = 30, max_text: in
 # Tool registry (consumed by the agent's system prompt)
 # ---------------------------------------------------------------------------
 
+def run_command(command: str, timeout: int = 60, sudo_ctx: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Run a shell command and return its output.
+
+    When *sudo_ctx* carries a password (sudo mode enabled via Shift+S in the
+    TUI), the command is run through `sudo -S` with the password piped to
+    stdin — so aido can perform privileged actions freely while sudo mode is
+    on. The password lives only in memory for the session and is never
+    written to disk.
+    """
+    if not command or not isinstance(command, str):
+        raise utils.AidoError("run_command needs a command string, e.g. 'df -h'.")
+    password = (sudo_ctx or {}).get("password") if isinstance(sudo_ctx, dict) else None
+    try:
+        if password:
+            proc = subprocess.Popen(
+                ["sudo", "-S", "--", "/bin/sh", "-c", command],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            out, err = proc.communicate(password + "\n", timeout=timeout)
+        else:
+            proc = subprocess.run(
+                ["/bin/sh", "-c", command],
+                capture_output=True, text=True, timeout=timeout, check=False,
+            )
+            out, err = proc.stdout, proc.stderr
+    except subprocess.TimeoutExpired:
+        raise utils.AidoError(f"Command timed out after {timeout}s: {command}") from None
+    return {
+        "command": command,
+        "sudo": bool(password),
+        "exit_code": proc.returncode,
+        "stdout": utils.truncate((out or "").strip() or "(no output)"),
+        "stderr": utils.truncate((err or "").strip() or ""),
+    }
+
+
 TOOL_REGISTRY: list[dict[str, Any]] = [
     {
         "name": "list_files",
@@ -773,6 +812,12 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
         "parameters": {"url": "http(s) URL", "destination": "optional absolute destination path (default: Downloads folder)"},
         "dangerous": False,
     },
+    {
+        "name": "run_command",
+        "description": "Run a shell command and return its output (stdout/stderr/exit code). With sudo mode enabled, commands run with root privileges.",
+        "parameters": {"command": "the shell command to run, e.g. 'df -h'", "timeout": "optional timeout in seconds (default 60)"},
+        "dangerous": True,
+    },
 ]
 
 TOOL_FUNCTIONS: dict[str, Any] = {
@@ -799,6 +844,7 @@ TOOL_FUNCTIONS: dict[str, Any] = {
     "fetch_url": fetch_url,
     "browse_page": browse_page,
     "download_file": download_file,
+    "run_command": run_command,
 }
 
 # Safety net: every registered tool must have an implementation, and vice versa.
