@@ -8,6 +8,7 @@ Command-line interface for the AIDO agent.
 - ``aido "question"`` → one-shot natural-language command
 - ``aido tools``      → list available tools
 - ``aido setup``      → download a local model + install the LLM backend
+- ``aido doctor``     → diagnose backend/model/network/API key
 - ``aido key``        → manage the encrypted remote API key (sudo)
 
 The GUI/tray/voice frontends were removed: promptLi OS is a headless,
@@ -34,14 +35,16 @@ def build_parser() -> argparse.ArgumentParser:
             "  aido                open the full-screen chat TUI\n"
             "  aido \"show disk usage\"\n"
             "  aido \"install htop\"\n"
-            "  aido tools"
+            "  aido tools          list what AIDO can do\n"
+            "  aido doctor         diagnose backend/model/network\n"
+            "  aido key set        store an encrypted API key (sudo)\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "command",
         nargs="*",
-        help="one-shot natural-language command, or one of: chat | tools | setup",
+        help="one-shot natural-language command, or one of: chat | tools | setup | doctor | key",
     )
     parser.add_argument(
         "--model",
@@ -128,15 +131,28 @@ def _run_setup() -> int:
 
     model_path = Path(utils.expand_path("~/.aido/models/granite.gguf"))
     print("AIDO setup — installs the local LLM backend and downloads a model.\n")
-    print("[1/2] Installing llama-cpp-python (this compiles, takes a few minutes)...")
+    print("[1/2] Installing llama-cpp-python (prebuilt wheel when available; source build otherwise)...")
+    ok = False
     try:
+        # Prefer the prebuilt manylinux wheel (seconds); fall back to a
+        # source compile (minutes) only when no wheel exists for this system.
         subprocess.run(
-            [sys.executable, "-m", "pip", "install", "--break-system-packages", "llama-cpp-python"],
+            [sys.executable, "-m", "pip", "install", "--break-system-packages",
+             "--prefer-binary", "llama-cpp-python"],
             check=True,
         )
-    except Exception as exc:
-        _print_error(f"llama-cpp-python install failed: {exc}")
-        return 1
+        ok = True
+    except Exception:
+        pass
+    if not ok:
+        try:
+            subprocess.run(
+                [sys.executable, "-m", "pip", "install", "--break-system-packages", "llama-cpp-python"],
+                check=True,
+            )
+        except Exception as exc:
+            _print_error(f"llama-cpp-python install failed: {exc}")
+            return 1
     print(f"[2/2] Downloading Granite 4.0 H 1B (Q4_K_M) to {model_path} ...")
     try:
         import requests  # lazily; requests is a light dependency
@@ -151,6 +167,60 @@ def _run_setup() -> int:
         _print_error(f"model download failed: {exc}")
         return 1
     print(f"✅ AIDO is ready. Try: aido chat  (model: {model_path})")
+    return 0
+
+
+def _run_doctor() -> int:
+    """Diagnose the AIDO install: backend, model, config, network, API key."""
+    from pathlib import Path
+
+    print("AIDO doctor\n")
+    rows: list[tuple[str, str]] = []
+
+    # Python + backend
+    rows.append(("python", sys.version.split()[0]))
+    try:
+        import llama_cpp  # noqa: F401
+
+        rows.append(("llama-cpp-python", "installed"))
+    except ImportError:
+        rows.append(("llama-cpp-python", "MISSING — run: aido setup"))
+
+    # Model
+    model_dir = Path(utils.expand_path("~/.aido/models"))
+    models = sorted(model_dir.glob("*.gguf")) if model_dir.is_dir() else []
+    if models:
+        for m in models:
+            size_mb = m.stat().st_size // (1024 * 1024)
+            rows.append(("model", f"{m.name} ({size_mb}MB)"))
+    else:
+        rows.append(("model", "MISSING — run: aido setup"))
+
+    # Config
+    cfg = utils.load_config(None)
+    rows.append(("config", "defaults" if not (Path.home() / ".aido" / "aido.yaml").is_file() else "~/.aido/aido.yaml"))
+
+    # API key
+    try:
+        from secrets import SECRET_PATH
+
+        rows.append(("API key", "set (encrypted)" if SECRET_PATH.is_file() else "not set (aido key set)"))
+    except Exception:
+        rows.append(("API key", "unknown"))
+
+    # Network to the model host (best effort, short timeout)
+    try:
+        import requests
+
+        requests.head(utils.MODEL_URL, timeout=6)
+        rows.append(("network (huggingface)", "reachable"))
+    except Exception:
+        rows.append(("network (huggingface)", "unreachable (or slow)"))
+
+    width = max(len(k) for k, _ in rows)
+    for key, value in rows:
+        print(f"  {key:<{width}}  {value}")
+    print("\nTip: `aido setup` installs the backend + model; `aido key set` stores an API key.")
     return 0
 
 
@@ -231,6 +301,8 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         if head == "setup":
             return _run_setup()
+        if head == "doctor":
+            return _run_doctor()
         if head == "chat":
             # Piped/redirected stdin keeps the old line-REPL; a real
             # terminal gets the full-screen TUI.

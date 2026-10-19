@@ -8,7 +8,7 @@ set -euo pipefail
 
 # Versioning: major is set by hand. Minor counts features/big changes since
 # v1.0.0 (see git history); patch counts every bug fix, however small.
-VERSION="1.25.0"
+VERSION="1.26.0"
 ISO_NAME="promptli-os-${VERSION}-amd64"
 
 echo "================================================"

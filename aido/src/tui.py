@@ -100,6 +100,15 @@ class ChatTui:
         self.quit = False
         self.exit_code = 0
         self.worker: Any = None
+        self.t_start: float | None = None
+        # Welcome message: a friendly first screen so the TUI never feels empty.
+        self.messages.append({
+            "role": "sys",
+            "text": (
+                "AIDO ready. Type anything — e.g. \"show disk usage\" or \"install htop\".\n"
+                "/help for commands · Shift+S for sudo mode"
+            ),
+        })
 
     # -- worker-thread side ----------------------------------------------
 
@@ -139,6 +148,7 @@ class ChatTui:
         self.messages.append({"role": "user", "text": text})
         self.messages.append({"role": "aido", "text": ""})
         self.busy = True
+        self.t_start = time.time()
         self.status = "thinking…"
         self.worker = threading.Thread(target=self._worker, args=(text,), daemon=True)
         self.worker.start()
@@ -152,13 +162,14 @@ class ChatTui:
                     "Just type what you want AIDO to do, in plain language.\n"
                     "Examples: \"list my Downloads\", \"show memory usage\", \"install htop\".\n"
                     "\n"
-                    "/help   this help        /clear   forget the conversation\n"
-                    "/tools  list what AIDO can do   /model  which model + API key status\n"
-                    "/exit   quit\n"
+                    "/help   this help            /clear   forget the conversation\n"
+                    "/tools  list what AIDO can do   /model  model + API key + sudo status\n"
+                    "/sudo   toggle sudo mode      /exit    quit\n"
                     "\n"
                     "Shift+S  toggle sudo mode — AIDO can then run commands as root\n"
                     "         (asks for your sudo password once; kept in memory only).\n"
-                    "Up/Down arrow = scroll, Enter = send. Ctrl+C twice or Ctrl+D = quit."
+                    "Tab = complete commands · Up/Down = history/scroll · Ctrl+L = redraw.\n"
+                    "Enter = send. Ctrl+C twice or Ctrl+D = quit."
                 ),
             })
         elif name == "clear":
@@ -185,7 +196,21 @@ class ChatTui:
                     key_status = "set (encrypted)"
             except Exception:
                 pass
-            self.messages.append({"role": "sys", "text": f"model: {path}\nAPI key: {key_status}"})
+            sudo_status = "ON" if self.sudo_on else "OFF"
+            self.messages.append({
+                "role": "sys",
+                "text": f"model: {path}\nAPI key: {key_status}\nsudo mode: {sudo_status}",
+            })
+        elif name == "sudo":
+            if self.sudo_on:
+                self.agent.sudo["password"] = None
+                self.sudo_on = False
+                self.status = "SUDO: OFF"
+                self.messages.append({"role": "sys", "text": "sudo mode OFF — commands run as your user again."})
+            else:
+                self.password_mode = True
+                self.password_buf = ""
+                self.status = "enter your sudo password (Esc cancels):"
         elif name == "exit":
             self.quit = True
         else:
@@ -207,7 +232,12 @@ class ChatTui:
                     "text": f"⚙ {call.get('tool')} {call.get('arguments')}",
                 })
             self.busy = False
-            self.status = ""
+            if self.t_start is not None:
+                elapsed = time.time() - self.t_start
+                self.t_start = None
+                self.status = f"replied in {elapsed:.1f}s"
+            else:
+                self.status = ""
         elif kind == "confirm":
             _, name, args = ev
             self.confirming = {"name": name, "args": args}
@@ -268,6 +298,12 @@ class ChatTui:
             return True
 
         if isinstance(ch, str):
+            if ch == "\t":  # Tab: complete slash commands
+                self._tab_complete()
+                return True
+            if ch == "\x0c":  # Ctrl+L: redraw
+                self.scroll = 0
+                return True
             if ch == "S":  # Shift+S toggles sudo mode
                 if self.sudo_on:
                     self.agent.sudo["password"] = None
@@ -303,6 +339,9 @@ class ChatTui:
             return True
 
         # Special keys (curses.KEY_*)
+        if ch == 9:  # Tab as a special key
+            self._tab_complete()
+            return True
         if ch in (curses.KEY_ENTER, 10, 13):  # Enter as a special key
             self._send(self.input_buf)
             self.input_buf = ""
@@ -331,6 +370,27 @@ class ChatTui:
         elif ch in (curses.KEY_BACKSPACE, curses.KEY_DC):
             self.input_buf = self.input_buf[:-1]
         return True
+
+    def _tab_complete(self) -> None:
+        """Tab-complete slash commands (only when the line starts with '/')."""
+        if not self.input_buf.startswith("/"):
+            return
+        commands = ["/help", "/clear", "/tools", "/model", "/sudo", "/exit"]
+        prefix = self.input_buf
+        matches = [c for c in commands if c.startswith(prefix)]
+        if len(matches) == 1:
+            self.input_buf = matches[0] + " "
+        elif len(matches) > 1:
+            # Extend to the longest common prefix, then show options.
+            common = prefix
+            for i in range(len(prefix), max(len(c) for c in matches)):
+                chars = {c[i] for c in matches if len(c) > i}
+                if len(chars) == 1:
+                    common += chars.pop()
+                else:
+                    break
+            self.input_buf = common
+            self.messages.append({"role": "sys", "text": "  " + "  ".join(matches)})
 
     # -- rendering ----------------------------------------------------------
 
@@ -361,7 +421,11 @@ class ChatTui:
         header = f" AIDO — {self.model_name} "
         if self.sudo_on:
             header += "[SUDO:ON] "
-        busy = " ●" if self.busy else ""
+        if self.busy:
+            spinner = "|/-\\"[int(time.time() * 4) % 4]
+            busy = f" {spinner}"
+        else:
+            busy = ""
         right = f"/help  Ctrl+C quit{busy}"
         stdscr.addstr(0, 0, header.ljust(w)[:w], _attr(_C_HEADER) | curses.A_BOLD)
         stdscr.addstr(0, max(0, w - len(right)), right[:w], _attr(_C_HEADER))
