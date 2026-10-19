@@ -132,6 +132,24 @@ class Agent:
         self.history: list[dict[str, str]] = []
         self.model = model if model is not None else self._load_model(model_path)
 
+    # -- roles & sessions ---------------------------------------------------
+
+    def set_system_prompt(self, text: str) -> None:
+        """Replace the system prompt (used by `.role` in the REPL)."""
+        self.system_prompt = text
+
+    def set_role_file(self, role_text: str | None) -> None:
+        """Set the system prompt from a role's markdown text, falling back to
+        the built-in agent prompt when *role_text* is None/empty."""
+        if role_text and role_text.strip():
+            self.system_prompt = role_text.strip()
+        else:
+            self.system_prompt = SYSTEM_PROMPT.format(tools=format_tool_schemas(tools.TOOL_REGISTRY))
+
+    def load_history(self, messages: list[dict[str, str]]) -> None:
+        """Seed the conversation history from a saved session."""
+        self.history = [dict(m) for m in messages]
+
     # -- model loading -----------------------------------------------------
 
     def _load_model(self, model_path: str | None):

@@ -8,7 +8,7 @@ set -euo pipefail
 
 # Versioning: major is set by hand. Minor counts features/big changes since
 # v1.0.0 (see git history); patch counts every bug fix, however small.
-VERSION="1.26.0"
+VERSION="1.26.1"
 ISO_NAME="promptli-os-${VERSION}-amd64"
 
 echo "================================================"
@@ -372,7 +372,7 @@ if [ -n "$SQS" ]; then
         opt/aido opt/promptli/tools \
         usr/local/bin/aido usr/local/bin/locakhost usr/local/bin/promptli \
         usr/local/bin/promptli-term usr/local/bin/promptli-kb \
-        usr/local/bin/starship usr/share/oh-my-zsh 2>/dev/null || true
+        usr/local/bin/starship usr/share/oh-my-zsh usr/share/aido 2>/dev/null || true
     chmod +x /usr/local/bin/aido /usr/local/bin/locakhost \
         /usr/local/bin/promptli /usr/local/bin/promptli-term \
         /usr/local/bin/promptli-kb /usr/local/bin/starship 2>/dev/null || true
@@ -552,9 +552,13 @@ fi
 # Ships from the aido/ source tree (GUI/tray/voice frontends removed).
 AIDO_SRC="$SCRIPT_DIR_REPO/aido"
 if [ -d "$AIDO_SRC/src" ]; then
-    mkdir -p "$INCLUDES/opt/aido"
+    mkdir -p "$INCLUDES/opt/aido" "$INCLUDES/usr/share/aido"
     cp -r "$AIDO_SRC/src" "$AIDO_SRC/config" "$INCLUDES/opt/aido/"
     cp "$AIDO_SRC/requirements.txt" "$AIDO_SRC/setup.py" "$INCLUDES/opt/aido/" 2>/dev/null || true
+    # Built-in roles (aichat-style: .role coder / .role shell).
+    if [ -d "$AIDO_SRC/roles" ]; then
+        cp -r "$AIDO_SRC/roles" "$INCLUDES/usr/share/aido/roles"
+    fi
     cat > "$INCLUDES/usr/local/bin/aido" << 'X'; chmod +x "$INCLUDES/usr/local/bin/aido"
 #!/bin/sh
 # AIDO — local, private AI assistant (terminal edition).

@@ -3,8 +3,8 @@
 
 Command-line interface for the AIDO agent.
 
-- ``aido``            → full-screen chat TUI
-- ``aido chat``       → same TUI (line REPL when stdin is not a terminal)
+- ``aido``            → aichat-style chat REPL (sessions, roles, streaming)
+- ``aido tui``        → the classic full-screen curses chat
 - ``aido "question"`` → one-shot natural-language command
 - ``aido tools``      → list available tools
 - ``aido setup``      → download a local model + install the LLM backend
@@ -22,8 +22,7 @@ import sys
 
 import utils
 from agent import Agent
-
-BANNER = "🤖 AIDO ready! Type 'exit' to quit."
+from repl import render_markdown
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -32,9 +31,12 @@ def build_parser() -> argparse.ArgumentParser:
         description="AIDO — a local, private AI assistant that controls your promptLi OS machine from the terminal.",
         epilog=(
             "Examples:\n"
-            "  aido                open the full-screen chat TUI\n"
+            "  aido                start chatting (aichat-style REPL)\n"
+            "  aido -s dev         chat in the 'dev' session\n"
+            "  aido -r             resume the most recent session\n"
             "  aido \"show disk usage\"\n"
             "  aido \"install htop\"\n"
+            "  aido tui            the full-screen curses chat\n"
             "  aido tools          list what AIDO can do\n"
             "  aido doctor         diagnose backend/model/network\n"
             "  aido key set        store an encrypted API key (sudo)\n"
@@ -44,7 +46,22 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "command",
         nargs="*",
-        help="one-shot natural-language command, or one of: chat | tools | setup | doctor | key",
+        help="one-shot natural-language command, or one of: chat | tui | tools | setup | doctor | key",
+    )
+    parser.add_argument(
+        "-s", "--session",
+        metavar="NAME",
+        help="chat in this session (saved under ~/.aido/sessions).",
+    )
+    parser.add_argument(
+        "-r", "--resume",
+        action="store_true",
+        help="resume the most recently used session.",
+    )
+    parser.add_argument(
+        "-e", "--execute",
+        metavar="TEXT",
+        help="run one question and exit (same as `aido \"question\"`).",
     )
     parser.add_argument(
         "--model",
@@ -87,28 +104,7 @@ def _print_tools() -> None:
         flag = "  (requires confirmation)" if tool.get("dangerous") else ""
         print(f"  {tool['name']:<18} {tool['description']}{flag}")
         print(f"{'':<20} params: {params}")
-    print("\nRun 'aido chat' and ask in plain language, e.g. \"What's in my Downloads folder?\"")
-
-
-def _repl(agent: Agent, assume_yes: bool, verbose: bool) -> int:
-    print(BANNER)
-    print('Try: "list my home directory", "show memory usage", or \'exit\' to quit.\n')
-    while True:
-        try:
-            line = input("You: ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print("\nGoodbye!")
-            return 0
-        if not line:
-            continue
-        if line.lower() in ("exit", "quit"):
-            print("Goodbye!")
-            return 0
-        result = agent.chat(line, interactive=True, assume_yes=assume_yes)
-        if verbose:
-            for call in result["tool_calls"]:
-                print(f"  ⚙️  {call.get('tool')} {call.get('arguments')}")
-        print(f"AIDO: {result['answer']}\n")
+    print("\nRun 'aido' and ask in plain language, e.g. \"What's in my Downloads folder?\"")
 
 
 def _load_agent(args: argparse.Namespace) -> tuple[Agent, dict]:
@@ -257,31 +253,50 @@ def _run_tui(args: argparse.Namespace) -> int:
         )
     except curses.error:
         # Terminal cannot do curses (TERM unset/dumb, serial vt220, …) —
-        # fall back to the plain line REPL.
-        try:
-            agent = Agent(model_path=str(model_path), config=config)
-        except utils.AidoError as exc:
-            _print_error(str(exc))
-            print("Tip: run `aido setup` to install the local model first.")
-            return 1
-        try:
-            return _repl(agent, assume_yes=args.yes, verbose=args.verbose)
-        finally:
-            agent.close()
+        # fall back to the aichat-style REPL.
+        return _run_repl_entry(args)
+
+
+def _run_repl_entry(args: argparse.Namespace) -> int:
+    """Start the aichat-style REPL (model errors are friendly + actionable)."""
+    from repl import run_repl
+
+    config = utils.load_config(args.config)
+    utils.setup_logging(
+        log_dir=config.get("logging", {}).get("dir"),
+        level=config.get("logging", {}).get("level", "INFO"),
+    )
+    try:
+        model_path = utils.resolve_model_path(explicit=args.model, config=config)
+    except utils.AidoError as exc:
+        _print_error(str(exc))
+        print("Tip: run `aido doctor` to diagnose, or `aido setup` to install the local model.")
+        return 1
+    try:
+        return run_repl(
+            lambda: Agent(model_path=str(model_path), config=config),
+            config,
+            str(model_path),
+            session_name=args.session,
+            resume_last=args.resume,
+        )
+    except utils.AidoError as exc:
+        _print_error(str(exc))
+        return 1
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
-    # Bare `aido` → the full-screen chat TUI.
-    if not args.command and not args.list_tools:
-        return _run_tui(args)
+    # One-shot via -e/--execute (aichat-style).
+    if args.execute:
+        args.command = [args.execute]
 
     if args.list_tools:
         _print_tools()
         return 0
 
-    # Subcommands (no model needed for tools/setup/key).
+    # Subcommands (no model needed for tools/setup/doctor/key).
     if args.command:
         head = args.command[0]
         if head == "tools":
@@ -303,31 +318,21 @@ def main(argv: list[str] | None = None) -> int:
             return _run_setup()
         if head == "doctor":
             return _run_doctor()
-        if head == "chat":
-            # Piped/redirected stdin keeps the old line-REPL; a real
-            # terminal gets the full-screen TUI.
-            if not sys.stdin.isatty():
-                try:
-                    agent, _config = _load_agent(args)
-                except utils.AidoError as exc:
-                    _print_error(str(exc))
-                    print("Tip: run `aido setup` to install the local model first.")
-                    return 1
-                try:
-                    return _repl(agent, assume_yes=args.yes, verbose=args.verbose)
-                except utils.AidoError as exc:
-                    _print_error(str(exc))
-                    return 1
-                finally:
-                    agent.close()
+        if head == "tui":
             return _run_tui(args)
+        if head == "chat":
+            return _run_repl_entry(args)
+
+    # Bare `aido` → the aichat-style REPL.
+    if not args.command:
+        return _run_repl_entry(args)
 
     # One-shot natural-language command.
     try:
         agent, _config = _load_agent(args)
     except utils.AidoError as exc:
         _print_error(str(exc))
-        print("Tip: run `aido setup` to install the local model first.")
+        print("Tip: run `aido doctor` to diagnose, or `aido setup` to install the local model.")
         return 1
 
     try:
@@ -336,7 +341,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.verbose:
             for call in result["tool_calls"]:
                 print(f"  ⚙️  {call.get('tool')} {call.get('arguments')}")
-        print(result["answer"])
+        print(render_markdown(str(result["answer"])))
         return 0
     except utils.AidoError as exc:
         _print_error(str(exc))

@@ -28,12 +28,20 @@ def _patch_cli_env(monkeypatch):
     monkeypatch.setattr(aido, "Agent", FakeAgent)
 
 
-def test_bare_aido_opens_tui(monkeypatch):
-    """Running `aido` with no arguments goes to the TUI path (degrading to the
-    line REPL when there is no terminal), and exits 0."""
+def test_bare_aido_opens_repl(monkeypatch):
+    """Running `aido` with no arguments starts the aichat-style REPL."""
     _patch_cli_env(monkeypatch)
-    monkeypatch.setattr(aido, "_repl", lambda *a, **k: 0)
+    import repl as repl_mod
+
+    monkeypatch.setattr(repl_mod, "run_repl", lambda *a, **k: 0)
     assert aido.main([]) == 0
+
+
+def test_aido_tui_subcommand(monkeypatch):
+    """`aido tui` still routes to the classic curses TUI."""
+    _patch_cli_env(monkeypatch)
+    monkeypatch.setattr(aido, "_run_tui", lambda *a, **k: 0)
+    assert aido.main(["tui"]) == 0
 
 
 def test_help_flag_prints_help(capsys):
