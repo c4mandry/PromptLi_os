@@ -125,7 +125,7 @@ Debian ships the ham-radio stack and other dead protocol families that are a
 recurring source of remotely-triggerable bugs — **16 of the 399 security
 fixes above are `rose`/`ax25` alone**. A server distro does not need them.
 
-Disabled in the promptLi kernel (`SURFACE=1`, the default):
+Disabled by the build script's default profile (`SURFACE=1`):
 
 ```
 HAMRADIO AX25 ROSE NETROM MKISS 6PACK BPQETHER ATALK NFC IEEE802154
@@ -135,6 +135,14 @@ This deletes the exact code paths that received those fixes, and trims the
 module set. `DCCP`, `RDS`, `TIPC`, `CAN` are intentionally **kept as modules**
 (edge/SBC and cluster use cases; they are not auto-loaded by unprivileged
 users because creating those sockets requires `CAP_NET_ADMIN`).
+
+> **Note on the attached test build:** the `linux-image-6.12.115-promptli`
+> package verified in `TEST-RESULTS.md` was built before `SURFACE=1` was
+> added to the script, so it still carries those protocol *modules* (built-in
+> `HAMRADIO` core, `ax25`/`rose`/`netrom` as `.ko`). They are not loaded by
+> default and cannot be instantiated without `CAP_NET_ADMIN`, so the exposure
+> is limited. Rebuilding with the current script (`SURFACE=1`, the default)
+> removes them entirely.
 
 ## 3b. Runtime hardening (shipped as a sysctl drop-in)
 
