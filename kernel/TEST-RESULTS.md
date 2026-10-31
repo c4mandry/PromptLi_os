@@ -79,6 +79,29 @@ burst short.
 - CPU vulnerability mitigations all still reported as mitigated/not-affected
   (identical to the Debian kernel in the same VM).
 
+## 4b. End-to-end: live ISO and installed system
+
+ISO `promptli-os-1.29.0-amd64.iso` was built with the new kernel, then
+booted and installed in QEMU:
+
+| Check | Result |
+|---|---|
+| Live ISO boots | ✅ |
+| Live `/boot` contents | only `vmlinuz-6.12.115-promptli` (+ config, System.map, initrd) |
+| Live `uname -r` | ✅ `6.12.115-promptli` |
+| Live `sched_bore` / TCP / zswap | ✅ `1` / `bbr` / `Y` |
+| `promptli-install` (CLI, BIOS, 8 GB disk) | ✅ `Installation complete` — all steps incl. driver selection, bootloader, enrollment |
+| Installed system boots | ✅ |
+| Installed `uname -r` / `sched_bore` / TCP | ✅ `6.12.115-promptli` / `1` / `bbr` |
+| Installed `/boot/vmlinuz-*` | ✅ single kernel |
+
+**Test-environment note:** under heavy *host* memory pressure (host swap full,
+3 GB guest) both this kernel **and** the stock Debian kernel printed
+`rcu_preempt detected stalls` during the unsquashfs step; with a 2 GB guest
+and page cache dropped, the install completed cleanly on both. It is a
+host-overcommit artefact, not a scheduling regression in the BORE kernel
+(the control run on Debian's kernel stalls identically).
+
 ## 5. Artifacts
 
 Built in `/var/tmp/kernel/` (kernel `6.12.115-promptli`, package version
