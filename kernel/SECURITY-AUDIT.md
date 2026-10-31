@@ -69,6 +69,9 @@ Representative fixes missing from 6.12.113 (from the 6.12.114/115 changelogs):
 **Fix:** the promptLi kernel is built from **6.12.115**, i.e. the whole 1,102-
 commit delta (including all of the above) is applied.
 
+> **Status:** promptLi OS **1.29.0** (built 2026-10-31) ships this kernel;
+the 1.28.x line still ships Debian's 6.12.113.
+
 > Note: Debian's security team does backport fixes into `6.12.113+deb13`, so
 > this gap is temporary in distro terms — but the promptLi kernel now tracks
 > upstream stable directly, which is the CachyOS model.
