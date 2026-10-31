@@ -8,7 +8,7 @@ set -euo pipefail
 
 # Versioning: major is set by hand. Minor counts features/big changes since
 # v1.0.0 (see git history); patch counts every bug fix, however small.
-VERSION="1.28.2"
+VERSION="1.29.0"
 ISO_NAME="promptli-os-${VERSION}-amd64"
 
 echo "================================================"
@@ -1351,8 +1351,12 @@ if [ -f /opt/promptli/vendor/promptli-kernel.deb ]; then
         || DEBIAN_FRONTEND=noninteractive apt-get install -y -f -qq 2>/dev/null || true
     if ls /boot/vmlinuz-*-promptli >/dev/null 2>&1; then
         echo "  [✓] Custom kernel installed: $(ls /boot/vmlinuz-*-promptli | head -1)"
-        DEBIAN_FRONTEND=noninteractive apt-get purge -y -qq linux-image-amd64 2>/dev/null || true
+        # Drop every non-promptli kernel image so the ISO ships exactly one.
+        DEBIAN_KERNELS=$(dpkg -l 'linux-image-*' 2>/dev/null | awk '/^ii/{print $2}' | grep -v 'promptli' | grep -v '^linux-image-amd64$' || true)
+        DEBIAN_FRONTEND=noninteractive apt-get purge -y -qq linux-image-amd64 $DEBIAN_KERNELS 2>/dev/null || true
         apt-get autoremove -y -qq 2>/dev/null || true
+        apt-mark manual initramfs-tools 2>/dev/null || true
+        update-initramfs -c -k "$(ls /lib/modules | grep promptli | head -1)" >/dev/null 2>&1 || true
     else
         echo "  [!] Custom kernel did not install — keeping Debian's kernel"
     fi
