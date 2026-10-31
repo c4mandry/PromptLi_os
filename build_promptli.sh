@@ -602,6 +602,20 @@ if [ -d "$SCRIPT_DIR_REPO/vendor" ]; then
     echo "[✓] Bundled vendor/ (makedeb etc.)"
 fi
 
+# ── Optional custom performance kernel (kernel/build_kernel.sh) ──
+# Opt-in: PROMPTLI_KERNEL_DEB=/path/linux-image-*-promptli_*.deb
+# The chroot hook installs it and drops Debian's kernel so the ISO ships
+# exactly one kernel (the custom one).
+if [ -n "${PROMPTLI_KERNEL_DEB:-}" ]; then
+    if [ ! -f "$PROMPTLI_KERNEL_DEB" ]; then
+        echo "error: PROMPTLI_KERNEL_DEB not found: $PROMPTLI_KERNEL_DEB" >&2
+        exit 1
+    fi
+    mkdir -p "$INCLUDES/opt/promptli/vendor"
+    cp "$PROMPTLI_KERNEL_DEB" "$INCLUDES/opt/promptli/vendor/promptli-kernel.deb"
+    echo "[✓] Custom kernel bundled: $(basename "$PROMPTLI_KERNEL_DEB")"
+fi
+
 # ── OS identity: promptLi OS, not "Debian" ────────────────
 mkdir -p "$INCLUDES/etc" "$INCLUDES/usr/lib/os-release"
 cat > "$INCLUDES/etc/os-release" << X
@@ -648,6 +662,39 @@ X
 cat > "$INCLUDES/etc/issue" << 'X'
 \S{PRETTY_NAME} \n \l
 
+X
+
+# ── Kernel/network hardening + latency tuning (sysctl) ────
+# Applied on both the live system and every installed system. Values follow
+# the kernel self-protection project (KSPP) recommendations plus BBR/zswap
+# tuning. See kernel/SECURITY-AUDIT.md.
+mkdir -p "$INCLUDES/etc/sysctl.d"
+cat > "$INCLUDES/etc/sysctl.d/90-promptli.conf" << 'X'
+# ── Kernel hardening ──
+kernel.kptr_restrict = 2
+kernel.dmesg_restrict = 1
+kernel.unprivileged_bpf_disabled = 1
+kernel.yama.ptrace_scope = 1
+kernel.perf_event_paranoid = 3
+net.core.bpf_jit_harden = 2
+fs.protected_hardlinks = 1
+fs.protected_symlinks = 1
+fs.protected_fifos = 2
+fs.protected_regular = 2
+
+# ── Network hardening ──
+net.ipv4.conf.all.rp_filter = 1
+net.ipv4.conf.default.rp_filter = 1
+net.ipv4.conf.all.accept_source_route = 0
+net.ipv4.conf.all.accept_redirects = 0
+net.ipv4.conf.all.send_redirects = 0
+net.ipv4.conf.default.accept_redirects = 0
+net.ipv4.conf.default.send_redirects = 0
+net.ipv4.tcp_syncookies = 1
+
+# ── Latency / throughput (BBR pacing + zswap) ──
+net.core.default_qdisc = fq
+vm.swappiness = 100
 X
 
 # ── fastfetch: custom promptLi logo + identity ───────────
@@ -1293,6 +1340,24 @@ if ! id promptli >/dev/null 2>&1; then
     chown -R promptli:promptli /home/promptli
 fi
 chsh -s /usr/bin/zsh root 2>/dev/null || true
+
+# ── Optional custom kernel (opt-in via PROMPTLI_KERNEL_DEB) ──
+# Installed last: keep initramfs-tools, install the custom kernel, then drop
+# Debian's linux-image so the ISO ships exactly one kernel.
+if [ -f /opt/promptli/vendor/promptli-kernel.deb ]; then
+    echo "  [*] Installing custom promptLi performance kernel..."
+    apt-mark manual initramfs-tools 2>/dev/null || true
+    DEBIAN_FRONTEND=noninteractive dpkg -i /opt/promptli/vendor/promptli-kernel.deb \
+        || DEBIAN_FRONTEND=noninteractive apt-get install -y -f -qq 2>/dev/null || true
+    if ls /boot/vmlinuz-*-promptli >/dev/null 2>&1; then
+        echo "  [✓] Custom kernel installed: $(ls /boot/vmlinuz-*-promptli | head -1)"
+        DEBIAN_FRONTEND=noninteractive apt-get purge -y -qq linux-image-amd64 2>/dev/null || true
+        apt-get autoremove -y -qq 2>/dev/null || true
+    else
+        echo "  [!] Custom kernel did not install — keeping Debian's kernel"
+    fi
+    rm -f /opt/promptli/vendor/promptli-kernel.deb
+fi
 
 # ── Permissions ─────────────────────────────────────────
 echo "  [*] Fixing permissions..."

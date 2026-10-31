@@ -136,6 +136,26 @@ module set. `DCCP`, `RDS`, `TIPC`, `CAN` are intentionally **kept as modules**
 (edge/SBC and cluster use cases; they are not auto-loaded by unprivileged
 users because creating those sockets requires `CAP_NET_ADMIN`).
 
+## 3b. Runtime hardening (shipped as a sysctl drop-in)
+
+The distro now ships `/etc/sysctl.d/90-promptli.conf` (applied on live and
+installed systems):
+
+| Sysctl | Value | Effect |
+|---|---|---|
+| `kernel.kptr_restrict` | 2 | hides kernel pointers from all users |
+| `kernel.dmesg_restrict` | 1 | dmesg only for root (info-leak reduction) |
+| `kernel.unprivileged_bpf_disabled` | 1 | no unprivileged eBPF (KSPP) |
+| `kernel.yama.ptrace_scope` | 1 | ptrace restricted to descendants |
+| `kernel.perf_event_paranoid` | 3 | no unprivileged perf events |
+| `net.core.bpf_jit_harden` | 2 | JIT constant blinding against spraying |
+| `fs.protected_{hardlinks,symlinks,fifos,regular}` | hardened | blocks classic /tmp & symlink attacks |
+| `net.ipv4.conf.*.rp_filter` | 1 | reverse-path filtering (anti-spoofing) |
+| `net.ipv4.conf.*.accept_{source_route,redirects}`, `send_redirects` | 0 | no ICMP redirect/source-route tricks |
+| `net.ipv4.tcp_syncookies` | 1 | SYN-flood resilience |
+| `net.core.default_qdisc` | fq | required for BBR pacing |
+| `vm.swappiness` | 100 | use compressed zswap before dropping cache |
+
 ---
 
 ## 4. Performance / responsiveness (CachyOS-style)
