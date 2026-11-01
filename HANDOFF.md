@@ -43,6 +43,19 @@ The current release is **1.29.0**, published as:
 Default live credentials: **`promptli` / `promptli`**. Root is **locked** by
 default unless the installer sets a root password.
 
+> **Where the source code lives (canonical, use only these):**
+>
+> | What | Absolute path | Git remote |
+> |---|---|---|
+> | OS (build script, installer, aido, kernel, docs) | `/home/ufi/promptlix/PromptLi_os` | `github.com/c4mandry/PromptLi_os` |
+> | Website + distribution API | `/home/ufi/Documents/v3.1/cont/v3.1` | `github.com/c4mandry/insight-inweave` |
+>
+> Nothing else is source. `PromptLi_os/promptli-os/` (lowercase-hyphen) and
+> `Readme.md`/`CONTEXT_FOR_X64.md` are **legacy and unused**. Build artifacts
+> (`output/`, `promptli-installer/target/`, `__pycache__/`) are deliberately
+> untracked — they are generated and published through the website and GitHub
+> Release assets, never committed.
+
 ---
 
 ## 2. Product philosophy (this drives every design decision)
@@ -1027,7 +1040,139 @@ cd /home/ufi/promptlix/PromptLi_os && git add -A && \
 
 ---
 
-## 20. Final notes for the next AI
+## 20. SSH access (remote administration)
+
+promptLi is console-first and ships **no SSH server by default** (it is a
+server distro, so this is deliberate attack-surface reduction). `openssh-client`
+is not installed either — only a zsh helper that starts an `ssh-agent` on
+demand. If you want to administer the machine from another computer, install
+and enable it: it is a normal Debian package on top of `apt`/`pacman`.
+
+### 20.1 Install and enable the server
+
+Run on the promptLi machine (from the console, or via the installer's shell):
+
+```sh
+sudo apt install -y openssh-server        # Debian package (pacman -S openssh also works)
+sudo systemctl enable --now ssh           # unit is ssh.service (alias sshd.service)
+systemctl status ssh --no-pager | head -5
+ss -tlnp | grep ':22'                     # must show sshd listening
+```
+
+`pacman -S openssh` achieves the same: the `pacman` wrapper sees
+`openssh-server` in the Debian archive and calls `apt-get install`.
+
+### 20.2 Find the address and connect
+
+```sh
+# on promptLi
+ip -4 addr show | grep 'inet '          # or: hostname -I
+# fastfetch already prints "Local IP (ens<X>)" on login
+```
+
+Networking is `systemd-networkd` + DHCP on wired ethernet, so the address is
+usually a `192.168.x.x` / `10.x.x.x` lease.
+
+From your workstation:
+
+```sh
+ssh promptli@<ip-address>
+# first connection: type "yes" to accept the host key, then the account password
+```
+
+The account password is whatever the installer set (default `promptli`). The
+console keymap does **not** affect SSH — the password is transmitted as
+characters, not as keystrokes on a regional layout.
+
+### 20.3 Key-based login (recommended)
+
+```sh
+# on your workstation
+ssh-keygen -t ed25519 -C "you@workstation"      # press Enter to accept defaults
+ssh-copy-id -i ~/.ssh/id_ed25519.pub promptli@<ip>
+ssh -i ~/.ssh/id_ed25519 promptli@<ip>            # should not ask for a password
+```
+
+If `ssh-copy-id` is unavailable, append the public key on the server:
+
+```sh
+mkdir -p ~/.ssh && chmod 700 ~/.ssh
+echo 'ssh-ed25519 AAAA... you@workstation' >> ~/.ssh/authorized_keys
+chmod 600 ~/.ssh/authorized_keys
+```
+
+### 20.4 Optional hardening
+
+```sh
+sudo tee /etc/ssh/sshd_config.d/10-promptli.conf >/dev/null <<'EOF'
+PermitRootLogin no
+PasswordAuthentication no
+PubkeyAuthentication yes
+X11Forwarding no
+EOF
+sudo systemctl restart ssh
+```
+
+**Keep your current session open** while testing the new config — if the key
+auth is misconfigured you would otherwise lock yourself out. Root login is
+already impossible by default (root is locked; `promptli` has sudo), so
+`PermitRootLogin no` is belt-and-braces.
+
+There is **no firewall enabled by default** on promptLi. If you add one
+(nftables/ufw), remember to allow TCP 22 before restarting the SSH service.
+
+### 20.5 Using SSH from promptLi (client side)
+
+`openssh-client` is not installed by default either. It is needed for
+`git@github.com:…` remotes, `scp`, `rsync` over SSH, and `ssh`. Install it:
+
+```sh
+sudo apt install -y openssh-client
+```
+
+### 20.6 SSH into a promptLi VM (QEMU test rig)
+
+Forward port 22 to a host port in the QEMU command line:
+
+```sh
+qemu-system-x86_64 -enable-kvm -cpu host -smp 2 -m 2048 \
+  -drive file=/var/tmp/promptli-test-disk.qcow2,format=qcow2,if=virtio \
+  -display none -serial stdio \
+  -netdev user,id=n0,hostfwd=tcp:127.0.0.1:2222-:22 \
+  -device e1000,netdev=n0
+# in the guest: sudo apt install -y openssh-server && sudo systemctl enable --now ssh
+# from the host:
+ssh -p 2222 promptli@127.0.0.1
+```
+
+(The existing test scripts in `/var/tmp/qemu-driver/` use
+`-netdev user,id=n0` **without** `hostfwd`; add it when you need SSH.)
+
+### 20.7 Troubleshooting
+
+| Symptom | Cause / fix |
+|---|---|
+| `Connection refused` | sshd is not installed or not running: `systemctl status ssh`, `ss -tlnp \| grep :22` |
+| `Connection timed out` / `No route to host` | wrong IP, different subnet, or the guest's DHCP lease changed: `ip a` on the server, `ping` from the client |
+| `Permission denied (publickey)` | wrong username, or permissions: `~/.ssh` 700, `authorized_keys` 600, owned by the user |
+| `Permission denied (password)` | wrong password — check the account, not the console keymap |
+| Key rejected after reinstall | the host key changed: `ssh-keygen -R <ip>` on the client |
+| `Host key verification failed` | same as above; or you are on the wrong host |
+| Works locally, not from outside | NAT/firewall on the route; a VM needs `hostfwd` (see 20.6) |
+
+Useful one-liners:
+
+```sh
+sudo journalctl -u ssh -n 50 --no-pager     # why sshd refused
+sudo sshd -t                                # validate sshd_config syntax
+sudo journalctl -u ssh -f                   # follow auth events (Debian 13 uses journald)
+sudo systemctl restart ssh                  # apply config changes
+sudo systemctl disable --now ssh            # turn SSH off again
+```
+
+---
+
+## 21. Final notes for the next AI
 
 - **Do not "improve" the ASCII logo, the version numbers, or the branding**
   unless asked. The user is specific about those.
