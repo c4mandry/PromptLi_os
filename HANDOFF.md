@@ -1,7 +1,7 @@
 # promptLi OS — Complete Project Handoff
 
 > **Audience:** the next AI (or developer) taking over this project.
-> **Last updated:** 2026-10-31, at release **1.29.0**.
+> **Last updated:** 2026-11-01, at release **1.29.1**.
 > **Read this whole document before touching anything.** It explains what the
 > project is, how every moving part works, where things live, how to build,
 > test and ship, and the traps that have already cost previous sessions hours.
@@ -33,11 +33,11 @@
   docs, receives enrollment callbacks from the installer, and serves the
   update manifest that installed machines poll.
 
-The current release is **1.29.0**, published as:
+The current release is **1.29.1**, published as:
 
 - `https://webnotes.work/os` (download page) and
   `https://webnotes.work/api/os/iso` (the ISO binary, public, no login).
-- GitHub release `c4mandry/PromptLi_os` tag `v1.29.0`, with the ISO **and**
+- GitHub release `c4mandry/PromptLi_os` tag `v1.29.1`, with the ISO **and**
   the kernel `.deb` packages as assets.
 
 Default live credentials: **`promptli` / `promptli`**. Root is **locked** by
@@ -761,6 +761,20 @@ manual, purges **all** non-promptli `linux-image-*` packages, regenerates the
 initramfs, and removes the bundled `.deb`. The result is an ISO with exactly
 one kernel.
 
+**GRUB path fix (learned the hard way in 1.29.0 → 1.29.1):** live-build
+generates the GRUB kernel path as
+`DEFAULT_KERNEL="$(basename chroot/boot/vmlinuz-*${DEFAULT_FLAVOUR})"` with
+flavour `amd64`. A custom kernel whose release does not end in `-amd64`
+(e.g. `6.12.115-promptli`) makes that glob stay **literal**, producing
+`linux /live/vmlinuz-*amd64` in `/boot/grub/grub.cfg`. GRUB does not expand
+globs → UEFI boot dies with "file not found" / "you need to boot the kernel
+first" (BIOS/isolinux uses the generic `/live/vmlinuz` and is unaffected).
+`build_promptli.sh` now ships a **binary hook**
+(`config/hooks/normal/9998-promptli-bootcfg.binary`) that runs after the boot
+configs are generated and rewrites them to the real file names found in the
+ISO staging tree. If you ever change the kernel naming again, keep this hook
+(or make the kernel release end in `-<flavour>`).
+
 ### 12.6 Caveats
 
 - **x86-64-v3** requires Haswell / Zen 1+ (the user's machine is a Ryzen 7
@@ -847,6 +861,7 @@ drive them with Python (`subprocess` + pipes). Learn these patterns:
 | `promptli-fast` then `promptli-norm` | both directions, markers, shell switch, os-release suffix |
 | Live boot + `uname -r` + `sched_bore`/`tcp_congestion_control` | the kernel actually ships and is active |
 | Install + boot on the release ISO | the installed system runs the same kernel |
+| **UEFI boot** (OVMF) and **BIOS boot** (isolinux) of the ISO | bootloader configs resolve the real kernel (see the 1.29.1 GRUB fix); capture a screenshot via QMP `screendump` and check for the login prompt |
 | `aido` pytest (`cd aido && python3 -m pytest tests -q`) | **82 passed, 2 skipped** |
 | `cargo test` in `promptli-installer` | version-ordering test |
 
@@ -939,6 +954,7 @@ These are all things that *were* bugs and are fixed — do not reintroduce them:
 | TUI menu index | "Install now" is index **11** (Drivers was inserted at 3); tests that hardcode 10 break | keep the order or update every test |
 | `promptli-update` | ignored the machine's own `--site`; didn't update autostart/profile scripts | pass `install.json` state; include the new paths |
 | Provider | `--drivers all` used to keep a *missing* bluez | base image must actually ship bluez/wireplumber/pipewire (fixed 1.28.2) |
+| Custom kernel + UEFI | live-build builds the GRUB path from `vmlinuz-*${DEFAULT_FLAVOUR}` (`amd64`); a kernel release like `6.12.115-promptli` leaves the glob literal → UEFI boot fails with "file not found" / "you need to boot the kernel first" (BIOS is fine) | binary hook `9998-promptli-bootcfg.binary` rewrites `boot/grub/grub.cfg` to the real `/live/vmlinuz-<release>` (fixed 1.29.1) |
 
 Also: `promptli-os/` and `Readme.md`/`CONTEXT_FOR_X64.md` are **legacy**;
 `vendor/` holds the makedeb `.deb`; `output/` is untracked.
