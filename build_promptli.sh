@@ -8,7 +8,7 @@ set -euo pipefail
 
 # Versioning: major is set by hand. Minor counts features/big changes since
 # v1.0.0 (see git history); patch counts every bug fix, however small.
-VERSION="1.29.0"
+VERSION="1.29.1"
 ISO_NAME="promptli-os-${VERSION}-amd64"
 
 echo "================================================"
@@ -1375,6 +1375,40 @@ chmod +x /opt/aido/src/aido.py
 echo "✅ Done."
 HOOK
 chmod +x config/hooks/normal/9999-promptli-customize.hook.chroot
+
+# ── Fix GRUB kernel path for non-Debian kernel names ────────
+# live-build computes the GRUB kernel path as
+#   DEFAULT_KERNEL="$(basename chroot/boot/vmlinuz-*${DEFAULT_FLAVOUR})"
+# with flavour "amd64". A custom kernel whose release does not end in
+# "-amd64" (e.g. 6.12.115-promptli) leaves the glob LITERAL, producing
+#   linux /live/vmlinuz-*amd64
+# in /boot/grub/grub.cfg — GRUB does not expand globs, so UEFI boots fail with
+# "file ... not found" / "you need to boot the kernel first". BIOS (isolinux)
+# uses the generic /live/vmlinuz and is unaffected.
+#
+# This binary hook runs AFTER the boot configs are generated (live-build order:
+# binary_grub_cfg -> binary_syslinux -> binary_hooks -> binary_iso) and
+# rewrites them to the real file names found in the ISO staging tree.
+cat > config/hooks/normal/9998-promptli-bootcfg.binary << 'X'; chmod +x config/hooks/normal/9998-promptli-bootcfg.binary
+#!/bin/sh
+# Runs with cwd = <build>/binary (live-build hook convention).
+set -e
+KIMG=$(ls live/vmlinuz-* 2>/dev/null | head -n1 || true)
+IIMG=$(ls live/initrd.img-* 2>/dev/null | head -n1 || true)
+[ -n "$KIMG" ] || exit 0
+KREL=${KIMG##*/vmlinuz-}
+IREL=${IIMG##*/initrd.img-}
+[ -n "$KREL" ] || exit 0
+for f in boot/grub/grub.cfg boot/grub/loopback.cfg boot/grub/config.cfg \
+         isolinux/live.cfg isolinux/isolinux.cfg; do
+    [ -f "$f" ] || continue
+    sed -i -E \
+        -e "s|/live/vmlinuz-[^[:space:]]*|/live/vmlinuz-$KREL|g" \
+        -e "s|/live/initrd\.img-[^[:space:]]*|/live/initrd.img-$IREL|g" \
+        "$f"
+done
+echo "  [✓] boot configs point at /live/vmlinuz-$KREL"
+X
 
 # ── BUILD ───────────────────────────────────────────────
 echo ""
