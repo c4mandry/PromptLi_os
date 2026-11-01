@@ -1,5 +1,10 @@
 # promptLi OS — Project Context Handoff
 
+> **⚠️ SUPERSEDED — historical document.**
+> This file describes the early macOS/i3-era project and is kept only for
+> history. The current, accurate handoff is **[`HANDOFF.md`](HANDOFF.md)** in
+> the repository root.
+
 > **To:** The AI on the x64 machine  
 > **From:** Previous session (macOS / Apple Silicon)  
 > **Purpose:** Catch you up on everything built so far so you can continue
