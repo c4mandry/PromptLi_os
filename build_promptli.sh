@@ -474,8 +474,20 @@ map_aur_dep() {
         glibc)   echo "libc6-dev" ;;
         zlib)    echo "zlib1g-dev" ;;
         xz)      echo "xz-utils" ;;
+        libgl)   echo "libgl1" ;;
+        libx11)  echo "libx11-6" ;;
+        libxext) echo "libxext6" ;;
+        expat)   echo "libexpat1" ;;
+        openssl) echo "openssl" ;;
         *)       echo "" ;;
     esac
+}
+
+# Record a package as AUR-installed (foreign to apt) so `pacman -Qm`
+# (yay's "foreign packages" query) can answer honestly.
+record_aur_pkg() {
+    mkdir -p /var/lib/promptli
+    grep -qx "$1" /var/lib/promptli/aur-pkgs 2>/dev/null || echo "$1" >> /var/lib/promptli/aur-pkgs
 }
 
 # Extract a PKGBUILD array (depends/makedepends/checkdepends) into plain
@@ -518,7 +530,7 @@ install_aur_deps() {
 
 NEED_ROOT=1
 case "$1" in
-    -Q*|-Ss*|-Si*|-V|--version|-h|--help|help|"") NEED_ROOT=0 ;;
+    -Q*|-Ss*|-Si*|-T*|-V|--version|-h|--help|help|"") NEED_ROOT=0 ;;
 esac
 [ "$(id -u)" = 0 ] || { [ $NEED_ROOT = 0 ] || exec sudo -E "$0" "$@"; }
 
@@ -530,6 +542,12 @@ case "$1" in
     -S)
         shift
         for pkg in "$@"; do
+            # yay/paru pass pacman flags here; they are accepted and
+            # ignored (--needed: apt-get install of an installed package is
+            # already a no-op; --asdeps: recorded below).
+            case "$pkg" in
+                --asdeps|--needed|--noconfirm|--noprogressbar|--disable-download-timeout|--overwrite=*) continue ;;
+            esac
             if apt-cache show "$pkg" >/dev/null 2>&1; then
                 apt-get install -y "$pkg"
             else
@@ -556,8 +574,79 @@ case "$1" in
                 else
                     (cd "$tmp" && makedeb -si --no-confirm)
                 fi
+                if dpkg -s "$pkg" >/dev/null 2>&1; then
+                    record_aur_pkg "$pkg"
+                fi
             fi
         done
+        ;;
+    -U)
+        # Install locally built Arch packages (.pkg.tar.zst, makepkg output).
+        # This is what makes AUR helpers (yay/paru) work natively: they build
+        # with makepkg and hand the result to `pacman -U`. The archive is
+        # converted on the fly to a .deb and installed via dpkg.
+        shift
+        for f in "$@"; do
+            case "$f" in
+                --asdeps|--needed|--noconfirm|--noprogressbar|--disable-download-timeout|--overwrite=*) continue ;;
+            esac
+            [ -f "$f" ] || { echo "error: package not found: $f" >&2; continue; }
+            pkginfo=$(bsdtar -xOf "$f" .PKGINFO 2>/dev/null || true)
+            pkgname=$(printf '%s\n' "$pkginfo" | sed -n 's/^pkgname = //p' | head -1)
+            [ -n "$pkgname" ] || { echo "error: '$f' is not an Arch package" >&2; continue; }
+            pkgver=$(printf '%s\n' "$pkginfo" | sed -n 's/^pkgver = //p' | head -1)
+            pkgdesc=$(printf '%s\n' "$pkginfo" | sed -n 's/^pkgdesc = //p' | head -1)
+            pkgarch=$(printf '%s\n' "$pkginfo" | sed -n 's/^arch = //p' | head -1)
+            case "$pkgarch" in x86_64) pkgarch=amd64 ;; any) pkgarch=all ;; esac
+            deps=""
+            for d in $(printf '%s\n' "$pkginfo" | sed -n 's/^depend = //p' | sed 's/[<>=].*//' | tr '\n' ' '); do
+                if apt-cache show "$d" >/dev/null 2>&1 || dpkg -s "$d" >/dev/null 2>&1; then
+                    deps="$deps $d"
+                else
+                    alt=$(map_aur_dep "$d")
+                    if [ -n "$alt" ]; then
+                        deps="$deps $alt"
+                    else
+                        echo "  [!] $pkgname: skipping unresolvable dep '$d'" >&2
+                    fi
+                fi
+            done
+            tmp="/tmp/pacman-u-$pkgname"
+            rm -rf "$tmp"; mkdir -p "$tmp"
+            bsdtar -xf "$f" -C "$tmp" 2>/dev/null || { echo "error: extract failed: $f" >&2; continue; }
+            rm -f "$tmp/.PKGINFO" "$tmp/.MTREE" "$tmp/.INSTALL" "$tmp/.BUILDINFO" 2>/dev/null || true
+            mkdir -p "$tmp/DEBIAN"
+            {
+                echo "Package: $pkgname"
+                echo "Version: $pkgver"
+                echo "Architecture: ${pkgarch:-all}"
+                echo "Maintainer: promptLi OS <os@webnotes.work>"
+                echo "Description: ${pkgdesc:-AUR package $pkgname}"
+                [ -n "$deps" ] && echo "Depends:${deps}"
+            } > "$tmp/DEBIAN/control"
+            chmod 755 "$tmp/DEBIAN/control" 2>/dev/null || true
+            dpkg-deb --build --root-owner-group "$tmp" "/tmp/$pkgname.deb" >/dev/null 2>&1
+            if dpkg -i "/tmp/$pkgname.deb"; then
+                record_aur_pkg "$pkgname"
+            else
+                echo "error: install failed for $pkgname" >&2
+            fi
+            rm -rf "$tmp" "/tmp/$pkgname.deb"
+        done
+        ;;
+    -T)
+        # Print the packages among the arguments that are NOT installed
+        # (yay uses this to check which dependencies are missing).
+        shift
+        for p in "$@"; do
+            case "$p" in -*) continue ;; esac
+            dpkg -s "$p" >/dev/null 2>&1 || echo "$p"
+        done
+        ;;
+    -D)
+        # Dependency marking (--asdeps/--asexplicit) — not tracked on the
+        # apt side; accept silently so helpers keep working.
+        exit 0
         ;;
     -Sy)
         apt-get update
@@ -582,10 +671,25 @@ case "$1" in
     -Q)
         dpkg -l | grep '^ii'
         ;;
+    -Qq)
+        dpkg-query -W -f='${Package}\n' 2>/dev/null
+        ;;
+    -Qm)
+        # Foreign (AUR-built) packages.
+        cat /var/lib/promptli/aur-pkgs 2>/dev/null
+        ;;
+    -Qi)
+        shift
+        dpkg -s "$1" 2>/dev/null || { echo "error: package '$1' was not found" >&2; exit 1; }
+        ;;
+    -Qo)
+        shift
+        dpkg -S "$1" 2>/dev/null || { echo "error: No package owns $1" >&2; exit 1; }
+        ;;
     -Qs)
         dpkg -l | grep "$2"
         ;;
-    -R|-Rns|-Rs)
+    -R|-Rns|-Rs|-Rdd)
         shift
         apt-get remove "$@"
         ;;
@@ -597,17 +701,24 @@ case "$1" in
 pacman (promptLi OS wrapper)
 
 promptLi OS is Debian-based, so packages install through apt. AUR packages
-are built from PKGBUILDs with makedeb and installed the same way.
+are built from PKGBUILDs with makedeb — or natively with makepkg + yay
+(`pacman -U` converts makepkg's .pkg.tar.zst to a .deb on install).
 
   pacman -S <pkg>     install (Debian repo first, then AUR build)
+  pacman -U <file>    install a locally built .pkg.tar.zst (yay/paru)
   pacman -V           show version
   pacman -Sy          apt update
   pacman -Su          apt upgrade
-  pacman -Syu         apt update + upgrade
+  pacman -Syu         apt update + upgrade (+ promptLi release layer)
   pacman -Ss <query>  search
   pacman -Si <pkg>    show package details
   pacman -Q           list installed packages
+  pacman -Qq          list installed package names
+  pacman -Qm          list AUR-built packages
+  pacman -Qi <pkg>    show installed package details
+  pacman -Qo <file>   which package owns a file
   pacman -Qs <query>  search installed packages
+  pacman -T <pkg...>  print which of these packages are missing
   pacman -R <pkg>     remove
   pacman -Sc          clear the apt cache
 
