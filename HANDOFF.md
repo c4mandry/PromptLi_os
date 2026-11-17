@@ -1,7 +1,7 @@
 # promptLi OS — Complete Project Handoff
 
 > **Audience:** the next AI (or developer) taking over this project.
-> **Last updated:** 2026-11-17, at release **1.29.2**.
+> **Last updated:** 2026-11-17, at release **1.29.3**.
 > **Read this whole document before touching anything.** It explains what the
 > project is, how every moving part works, where things live, how to build,
 > test and ship, and the traps that have already cost previous sessions hours.
@@ -26,24 +26,26 @@
 - **`aido`**, a local (offline-capable) AI assistant that runs in the
   terminal, with 35 tools that can manipulate files, packages, services and
   the network — optionally with root privileges.
-- **A custom performance kernel** (`6.12.115-promptli`) with the **BORE**
+- **A custom performance kernel** (`6.12.118-promptli`) with the **BORE**
   scheduler, full preemption, HZ=1000, `-march=x86-64-v3`, BBR, MGLRU,
   zswap/zstd and an aggressive hardening set (see §12).
 - **A website** (`webnotes.work`) that distributes the ISO, hosts the install
   docs, receives enrollment callbacks from the installer, and serves the
   update manifest that installed machines poll.
 
-The current release is **1.29.2**, published as:
+The current release is **1.29.3**, published as:
 
 - `https://webnotes.work/os` (download page) and
   `https://webnotes.work/api/os/iso` (the ISO binary, public, no login).
-- GitHub release `c4mandry/PromptLi_os` tag `v1.29.2`.
+- GitHub release `c4mandry/PromptLi_os` tag `v1.29.3` (ISO + kernel `.deb`s).
 
-1.29.2 fixed the AUR layer end-to-end: the pacman wrapper now installs
-PKGBUILD makedepends (mapped Arch→Debian) before building, makedeb-rs and
-mist are rebuilt from source against trixie's apt with a serial-console
-progress fix, and mist is vendored so AUR tooling never depends on
-proget.makedeb.org being up (see §9).
+1.29.2 fixed the AUR layer end-to-end (pacman wrapper installs PKGBUILD
+makedepends mapped Arch→Debian; makedeb-rs and mist rebuilt against trixie's
+apt with a serial-console progress fix; mist vendored — see §9).
+1.29.3 rebased the kernel to **6.12.118** (latest 6.12 LTS), validates the
+keymap in `promptli-kb`, and makes the updater ship `/boot` + `/lib/modules`
+so future kernel upgrades install over `pacman -Syu` (initramfs + GRUB are
+rebuilt when a newer kernel arrives).
 
 Default live credentials: **`promptli` / `promptli`**. Root is **locked** by
 default unless the installer sets a root password.
