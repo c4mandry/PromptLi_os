@@ -1029,13 +1029,24 @@ if [ -z "$K" ]; then
     echo "Current console keymap: $(grep -m1 KEYMAP= /etc/vconsole.conf 2>/dev/null | cut -d= -f2)"
     exit 0
 fi
-sed -i "s/^KEYMAP=.*/KEYMAP=$K/" /etc/vconsole.conf 2>/dev/null || \
+# Validate BEFORE touching any config: a bogus layout would corrupt the
+# console-setup cache and break the login keymap (the historical
+# <ffffffff> keypress bug). loadkeys validates against real keymap files.
+if command -v loadkeys >/dev/null 2>&1; then
+    if ! loadkeys "$K" 2>/dev/null; then
+        echo "Unknown keymap: $K (see /usr/share/keymaps)" >&2
+        exit 1
+    fi
+fi
+if grep -q '^KEYMAP=' /etc/vconsole.conf 2>/dev/null; then
+    sed -i "s/^KEYMAP=.*/KEYMAP=$K/" /etc/vconsole.conf
+else
     echo "KEYMAP=$K" >> /etc/vconsole.conf
+fi
 if command -v setupcon >/dev/null 2>&1 && [ -f /etc/default/keyboard ]; then
     sed -i "s/^XKBLAYOUT=.*/XKBLAYOUT=\"$K\"/" /etc/default/keyboard
     setupcon --save 2>/dev/null || true
 fi
-command -v loadkeys >/dev/null 2>&1 && loadkeys "$K" 2>/dev/null || true
 echo "Console keymap → $K"
 X
 
