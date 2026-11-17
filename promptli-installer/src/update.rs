@@ -159,6 +159,7 @@ fn apply_release(version: &str, site: &str) -> io::Result<()> {
                  usr/local/bin/promptli-install usr/local/bin/promptli-update \
                  usr/local/bin/promptli-getty usr/local/bin/locakhost \
                  usr/local/bin/mist usr/share/makedeb/makedeb-rs \
+                 boot lib/modules \
                  usr/local/bin/starship usr/share/oh-my-zsh usr/share/aido";
     let out = proc::run_capture_combined(
         "sh",
@@ -191,6 +192,24 @@ fn apply_release(version: &str, site: &str) -> io::Result<()> {
     proc::run_capture_combined(
         "sh",
         &["-c", "chmod +x /usr/local/bin/aido /usr/local/bin/pacman /usr/local/bin/promptli* /usr/local/bin/locakhost 2>/dev/null || true"],
+    );
+
+    // Kernel updates: the release layer now ships /boot + /lib/modules. When
+    // the ISO carries a NEWER kernel than the running one, build its
+    // initramfs (the live initrd is live-boot only) and refresh the
+    // bootloader so `pacman -Syu` upgrades the kernel too, not just
+    // userspace.
+    proc::run_capture_combined(
+        "sh",
+        &[
+            "-c",
+            "NEWKREL=$(ls /boot/vmlinuz-* 2>/dev/null | sed 's|.*/vmlinuz-||' | sort -V | tail -1); \
+             [ -n \"$NEWKREL\" ] && [ \"$NEWKREL\" != \"$(uname -r)\" ] && { \
+                 echo \"New kernel $NEWKREL found - building initramfs...\"; \
+                 update-initramfs -c -k \"$NEWKREL\" 2>&1 || true; \
+                 update-grub 2>&1 || true; \
+             } || true",
+        ],
     );
 
     proc::run_capture_combined("sh", &["-c", "umount /var/tmp/promptli-update-mnt 2>/dev/null || true"]);
