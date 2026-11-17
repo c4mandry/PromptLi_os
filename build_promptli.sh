@@ -8,7 +8,7 @@ set -euo pipefail
 
 # Versioning: major is set by hand. Minor counts features/big changes since
 # v1.0.0 (see git history); patch counts every bug fix, however small.
-VERSION="1.29.1"
+VERSION="1.29.2"
 ISO_NAME="promptli-os-${VERSION}-amd64"
 
 echo "================================================"
@@ -461,6 +461,61 @@ cat > "$INCLUDES/usr/local/bin/pacman" << 'X'; chmod +x "$INCLUDES/usr/local/bin
 #   -R pkg   remove a package
 set -e
 
+# Debian package name(s) for a common Arch dependency (echoes nothing when
+# the raw name already exists in Debian or no mapping is known).
+map_aur_dep() {
+    case "$1" in
+        go)      echo "golang-go" ;;
+        python)  echo "python3" ;;
+        pip)     echo "python3-pip" ;;
+        ninja)   echo "ninja-build" ;;
+        rust)    echo "rustc cargo" ;;
+        rustup)  echo "rustup" ;;
+        glibc)   echo "libc6-dev" ;;
+        zlib)    echo "zlib1g-dev" ;;
+        xz)      echo "xz-utils" ;;
+        *)       echo "" ;;
+    esac
+}
+
+# Extract a PKGBUILD array (depends/makedepends/checkdepends) into plain
+# names without version constraints.
+parse_pkgbuild_arr() {
+    awk -v key="$1" '
+        $0 ~ ("^[[:space:]]*" key "=") {
+            f=1
+            line=$0
+            sub(("^[[:space:]]*" key "="), "", line)
+            print line
+            if (line ~ /\)/) exit
+            next
+        }
+        f {
+            print
+            if ($0 ~ /\)/) exit
+        }
+    ' PKGBUILD \
+        | tr -d '()"' | tr -d "'" | tr ' \t' '\n' \
+        | grep -v '^$' | sed 's/>=.*//;s/<=.*//;s/>.*//;s/<.*//;s/=.*//'
+}
+
+# Install a PKGBUILD's depends/makedepends/checkdepends via apt (makedeb -s
+# only reliably syncs `depends`, and AUR packages like yay list build tools
+# in makedepends). Arch names are mapped to Debian ones where needed.
+install_aur_deps() {
+    for dep in $(parse_pkgbuild_arr depends) \
+               $(parse_pkgbuild_arr makedepends) \
+               $(parse_pkgbuild_arr checkdepends); do
+        [ -n "$dep" ] || continue
+        if apt-cache show "$dep" >/dev/null 2>&1; then
+            apt-get install -y -qq "$dep" || true
+        else
+            alt=$(map_aur_dep "$dep")
+            [ -n "$alt" ] && apt-get install -y -qq $alt || true
+        fi
+    done
+}
+
 NEED_ROOT=1
 case "$1" in
     -Q*|-Ss*|-Si*|-V|--version|-h|--help|help|"") NEED_ROOT=0 ;;
@@ -482,11 +537,22 @@ case "$1" in
                 tmp="/tmp/aur-$pkg"
                 rm -rf "$tmp"
                 git clone --depth 1 "https://aur.archlinux.org/$pkg.git" "$tmp"
-                # makepkg/makedeb refuse to run as root — drop back to the
-                # invoking user for the build (makedeb -s sudo's for deps).
-                if [ "$(id -u)" = 0 ] && [ -n "${SUDO_USER:-}" ]; then
-                    chown -R "$SUDO_USER" "$tmp"
-                    runuser -u "$SUDO_USER" -- sh -c "cd '$tmp' && makedeb -si --no-confirm"
+                # Install deps first (makedeb -s only syncs `depends`;
+                # AUR packages like yay list build tools in makedepends).
+                (cd "$tmp" && install_aur_deps)
+                # makepkg/makedeb refuse to run as root — always drop to a
+                # non-root user for the build. Prefer the invoking user when
+                # we came through sudo; fall back to promptli for root logins
+                # (a root login must NOT run makedeb itself - it would refuse
+                # and AUR installs would break). makedeb -s sudo's for deps.
+                build_user="${SUDO_USER:-}"
+                if [ "$(id -u)" = 0 ]; then
+                    [ -n "$build_user" ] || build_user=promptli
+                    if ! id "$build_user" >/dev/null 2>&1; then
+                        build_user=promptli
+                    fi
+                    chown -R "$build_user" "$tmp"
+                    runuser -u "$build_user" -- sh -c "cd '$tmp' && makedeb -si --no-confirm"
                 else
                     (cd "$tmp" && makedeb -si --no-confirm)
                 fi
@@ -1012,10 +1078,29 @@ cp -r /etc/skel/. /home/promptli/ 2>/dev/null || true
 chown -R promptli:promptli /home/promptli 2>/dev/null || true
 cp -f /etc/skel/.zshrc /root/.zshrc 2>/dev/null || true
 chsh -s /usr/bin/zsh root 2>/dev/null || true
+# A zsh history file with NUL bytes or megabyte-long lines (e.g. garbage
+# from a serial-console session) makes zsh print "corrupt history file" on
+# every shell start. Reset it defensively instead of leaving a broken state.
+ZH=/home/promptli/.zsh_history
+if [ -f "$ZH" ] && [ -s "$ZH" ]; then
+    if od -An -t x1 "$ZH" 2>/dev/null | grep -q ' 00' || awk 'length($0)>1048576{exit 1}' "$ZH"; then
+        awk 'length($0)<=1048576' "$ZH" > "$ZH.tmp" 2>/dev/null
+        tr -d '\000' < "$ZH.tmp" > "$ZH" 2>/dev/null
+        rm -f "$ZH.tmp"
+        chown promptli:promptli "$ZH" 2>/dev/null || true
+    fi
+fi
 # aido's light deps (PyYAML, requests) come from Debian packages; no pip
 # install is needed at first boot.
-# AUR: if mist isn't installed yet (makedeb repo was down during the build),
-# retry now that the machine is online.
+# AUR: if mist isn't installed yet, prefer the vendored trixie build
+# (vendor/mist/mist) so AUR tooling works even when the makedeb repo is
+# down; the repo install is only an upgrade path.
+if ! command -v mist >/dev/null 2>&1; then
+    if [ -f /opt/promptli/vendor/mist/mist ]; then
+        cp -f /opt/promptli/vendor/mist/mist /usr/local/bin/mist
+        chmod +x /usr/local/bin/mist
+    fi
+fi
 if ! command -v mist >/dev/null 2>&1; then
     echo "  [*] Retrying mist install (AUR support)..."
     wget -qO- --timeout=10 'https://proget.makedeb.org/releases/makedeb/makedeb.pub' 2>/dev/null | \
@@ -1098,8 +1183,9 @@ if command -v setupcon >/dev/null 2>&1; then
 fi
 
 # ── AUR support: makedeb + mist (install AUR packages on Debian) ──
-# makedeb is vendored (vendor/makedeb/*.deb) so the build works offline;
-# mist comes from the makedeb repo and is retried at first boot if it's down.
+# makedeb is vendored (vendor/makedeb/*.deb + a trixie-built makedeb-rs);
+# mist is vendored as a trixie-built binary too (vendor/mist/mist), so AUR
+# tooling never depends on the makedeb repo (proget.makedeb.org) being up.
 echo "  [*] Setting up AUR support (makedeb + mist)..."
 VENDOR_DEB=$(find /opt/promptli/vendor/makedeb -name '*.deb' 2>/dev/null | head -1)
 if [ -n "$VENDOR_DEB" ] && ! command -v makedeb >/dev/null 2>&1; then
@@ -1117,6 +1203,14 @@ if [ -f "$VENDOR_RS" ] && [ -f /usr/share/makedeb/makedeb-rs ]; then
     chmod +x /usr/share/makedeb/makedeb-rs
     echo "  [✓] makedeb-rs replaced with trixie build"
 fi
+# Install the vendored mist binary (built from source against trixie's apt
+# so it links libapt-pkg.so.7.0). The repo install below is only an upgrade
+# path for when proget.makedeb.org is online.
+if ! command -v mist >/dev/null 2>&1 && [ -f /opt/promptli/vendor/mist/mist ]; then
+    cp -f /opt/promptli/vendor/mist/mist /usr/local/bin/mist
+    chmod +x /usr/local/bin/mist
+    echo "  [✓] mist installed from vendored trixie build"
+fi
 # Try the makedeb repo for mist (may be offline; setup.sh retries on first boot).
 if ! command -v mist >/dev/null 2>&1; then
     wget -qO- --timeout=10 'https://proget.makedeb.org/releases/makedeb/makedeb.pub' 2>/dev/null | \
@@ -1129,7 +1223,7 @@ if ! command -v mist >/dev/null 2>&1; then
     fi
 fi
 if command -v makedeb >/dev/null 2>&1; then echo "  [✓] makedeb installed"; else echo "  [!] makedeb install failed"; fi
-if command -v mist >/dev/null 2>&1; then echo "  [✓] mist installed (AUR ready)"; else echo "  [!] mist not available yet (repo offline; retried at first boot)"; fi
+if command -v mist >/dev/null 2>&1; then echo "  [✓] mist installed (AUR ready)"; else echo "  [!] mist not available (AUR still works via pacman -S)"; fi
 
 # ── Fix makepkg.conf architecture for AUR builds ──────────
 # Debian's pacman-package-manager ships CARCH="$(uname -p)" — but Debian

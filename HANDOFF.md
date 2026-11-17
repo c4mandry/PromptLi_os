@@ -50,11 +50,12 @@ default unless the installer sets a root password.
 > | OS (build script, installer, aido, kernel, docs) | `/home/ufi/promptlix/PromptLi_os` | `github.com/c4mandry/PromptLi_os` |
 > | Website + distribution API | `/home/ufi/Documents/v3.1/cont/v3.1` | `github.com/c4mandry/insight-inweave` |
 >
-> Nothing else is source. `PromptLi_os/promptli-os/` (lowercase-hyphen) and
-> `Readme.md`/`CONTEXT_FOR_X64.md` are **legacy and unused**. Build artifacts
-> (`output/`, `promptli-installer/target/`, `__pycache__/`) are deliberately
-> untracked — they are generated and published through the website and GitHub
-> Release assets, never committed.
+> Nothing else is source. Build artifacts (`output/`,
+> `promptli-installer/target/`, `__pycache__/`) are deliberately untracked —
+> they are generated and published through the website and GitHub Release
+> assets, never committed. (The old macOS-era `promptli-os/` tree and the
+> legacy `Readme.md`/`CONTEXT_FOR_X64.md` were deleted; this document is the
+> authoritative reference.)
 
 ---
 
@@ -114,19 +115,12 @@ PromptLi_os/
 │   ├── TEST-RESULTS.md        # measured latency + end-to-end verification
 │   └── README.md
 ├── tools/github_release.sh    # publish an ISO as a GitHub release asset
-├── vendor/                    # vendored .deb(s) for AUR (makedeb)
+├── vendor/                    # vendored AUR tooling: makedeb .deb + makedeb-rs,
+│                              # mist — all built against trixie's apt
 ├── output/                    # NOT tracked: published ISOs + latest.json
 │   └── kernel/                # published kernel .deb packages
-├── promptli-os/               # LEGACY (macOS-era i3 project files) — unused
-├── promptli-os-source.zip     # LEGACY
-├── CONTEXT_FOR_X64.md         # LEGACY handoff (outdated; this document replaces it)
-└── Readme.md                  # LEGACY narrative (historical, not current docs)
+└── HANDOFF.md                 # this document (authoritative project docs)
 ```
-
-**Important:** `promptli-os/` (lowercase-hyphen) is the old desktop/i3 project.
-It is **not used** by the current build. Do not "fix" it, and do not
-reintroduce i3/GUI assets from it. `Readme.md` and `CONTEXT_FOR_X64.md`
-describe that old world; they are historical.
 
 ### 3.2 Website repo — `/home/ufi/Documents/v3.1/cont/v3.1`
 
@@ -241,11 +235,13 @@ sudo -n env PROMPTLI_OUTPUT_DIR=/var/tmp/outputXXXX bash build_promptli.sh
     (post-login keymap switch), **autostart framework**
     (`/etc/promptli/autostart.d/*.sh`, user dir in `~/.config/promptli/`).
 18. **First-boot service** `promptli-setup.service` → `/opt/promptli/setup.sh`
-    (ensures user exists, syncs skel, retries `mist` install, disables itself).
+    (ensures user exists, syncs skel, sanitizes a corrupt zsh history,
+    retries `mist` install, disables itself).
 19. **Chroot hook** (`config/hooks/normal/9999-promptli-customize.hook.chroot`),
     which does the real system surgery inside the chroot:
     - console keymap via `/etc/default/keyboard` + `console-setup` cache;
-    - AUR tooling (makedeb vendored `.deb`, `mist`), makepkg arch fix;
+    - AUR tooling (makedeb vendored `.deb` + trixie-built `makedeb-rs`,
+      vendored `mist` binary), makepkg arch fix;
     - fast-boot/low-RAM tweaks (mask `systemd-networkd-wait-online`,
       `NetworkManager-wait-online`, `ModemManager`, `man-db.timer`,
       `fstrim.timer`, `cron.service`, **`wpa_supplicant.service`**,
@@ -522,8 +518,18 @@ Three pieces:
    over `/usr/bin/pacman`):
    - `-S pkg`: if `apt-cache show pkg` succeeds → `apt-get install`; else
      clone `https://aur.archlinux.org/pkg.git` and build with `makedeb -si
-     --no-confirm`. When run as root it drops back to `$SUDO_USER` for the
-     build (makepkg/makedeb refuse to run as root).
+     --no-confirm`. When run as root it drops back to `$SUDO_USER` (or the
+     `promptli` user for root logins) for the build — makepkg/makedeb refuse
+     to run as root.
+   - **Dependencies**: before the build the wrapper parses the PKGBUILD's
+     `depends`/`makedepends`/`checkdepends` (via `parse_pkgbuild_arr`) and
+     `apt-get install`s them, mapping common Arch names to Debian ones
+     (`go`→`golang-go`, `python`→`python3`, `ninja`→`ninja-build`,
+     `rust`→`rustc cargo`, `glibc`→`libc6-dev`, `zlib`→`zlib1g-dev`,
+     `xz`→`xz-utils`). This matters because makedeb's `-s` only syncs
+     `depends` (its makedepends installer is dead code in the upstream
+     beta/alpha) — without this, `pacman -S yay` fails with
+     `make: go: No such file or directory`.
    - `-Syu`/`-Suy` → `promptli-update --apply` (§8); `-Sy` → apt update;
      `-Su` → apt upgrade.
    - `-Ss` → `apt-cache search`, `-Si` → `apt-cache show`, `-Q` → dpkg
@@ -531,12 +537,33 @@ Three pieces:
    - `pacman -V` prints the OS version.
 2. **`makedeb`** — vendored `.deb` under `vendor/`, installed in the chroot
    hook (with `--force-overwrite` because Debian's makepkg also ships
-   `/etc/makepkg.conf`). The build also fixes `makepkg.conf` architecture
-   for AUR builds.
-3. **`mist`** — from the makedeb repo; if the repo was down during the
-   build, `promptli-setup.service` retries on first boot.
+   `/etc/makepkg.conf`). The `.deb`'s bullseye-built `makedeb-rs` links
+   `libapt-pkg.so.6.0`, so the hook replaces it with a trixie-built binary
+   from `vendor/makedeb/makedeb-rs`. The build also fixes `makepkg.conf`
+   architecture for AUR builds.
+3. **`mist`** — vendored as a trixie-built binary (`vendor/mist/mist`,
+   built from `github.com/makedeb/mist` with a patched `rust-apt`), copied
+   to `/usr/local/bin/mist` in the chroot hook. The makedeb repo
+   (proget.makedeb.org) install is kept only as an upgrade path for when
+   the repo is online — AUR tooling must not depend on its uptime.
 
-Known good: `pacman -S yay` works on promptLi (verified in QEMU).
+**Vendored binaries are rebuilt against trixie's apt** (see
+`vendor/README` notes below and the build logs):
+- `rust-apt` (git dependency) needed `-std=c++14`→`-std=c++17` (trixie apt
+  headers use `std::string_view`) and `std::string(flNotDir(...))` at
+  `apt-pkg-c/cache.cc:64` (trixie's `flNotDir` returns `string_view`).
+- `mist` is edition 2021 with `#![feature(let_chains)]`; the feature gate
+  was removed and 6 let-chains rewritten as nested ifs (stable rustc).
+- **Critical fix**: `rust-apt/src/progress.rs` (`AptInstallProgress`)
+  computed `term_width - 17` — on serial consoles (ttyS0/IPMI) the width
+  reports 0, the subtraction underflowed and `.try_into().unwrap()`
+  panicked (`PosOverflow`), aborting makedeb-rs mid-apt-install and leaving
+  dpkg "interrupted". Fixed with `saturating_sub` + skip when 0.
+  Without this, `pacman -S <aur>` crashes on headless servers.
+
+Known good (verified in QEMU, 1.29.2 test rounds): `pacman -S pfetch` and
+`pacman -S yay` (builds `go`-based yay end-to-end, including the
+makedepends install) both succeed on promptLi.
 
 ---
 
@@ -956,8 +983,8 @@ These are all things that *were* bugs and are fixed — do not reintroduce them:
 | Provider | `--drivers all` used to keep a *missing* bluez | base image must actually ship bluez/wireplumber/pipewire (fixed 1.28.2) |
 | Custom kernel + UEFI | live-build builds the GRUB path from `vmlinuz-*${DEFAULT_FLAVOUR}` (`amd64`); a kernel release like `6.12.115-promptli` leaves the glob literal → UEFI boot fails with "file not found" / "you need to boot the kernel first" (BIOS is fine) | binary hook `9998-promptli-bootcfg.binary` rewrites `boot/grub/grub.cfg` to the real `/live/vmlinuz-<release>` (fixed 1.29.1) |
 
-Also: `promptli-os/` and `Readme.md`/`CONTEXT_FOR_X64.md` are **legacy**;
-`vendor/` holds the makedeb `.deb`; `output/` is untracked.
+`vendor/` holds the makedeb `.deb`, the trixie-built `makedeb-rs` binary,
+and the trixie-built `mist` binary (see §AUR below); `output/` is untracked.
 
 ---
 
