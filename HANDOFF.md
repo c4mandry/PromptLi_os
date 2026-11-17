@@ -1,7 +1,7 @@
 # promptLi OS — Complete Project Handoff
 
 > **Audience:** the next AI (or developer) taking over this project.
-> **Last updated:** 2026-11-01, at release **1.29.1**.
+> **Last updated:** 2026-11-17, at release **1.29.2**.
 > **Read this whole document before touching anything.** It explains what the
 > project is, how every moving part works, where things live, how to build,
 > test and ship, and the traps that have already cost previous sessions hours.
@@ -33,12 +33,17 @@
   docs, receives enrollment callbacks from the installer, and serves the
   update manifest that installed machines poll.
 
-The current release is **1.29.1**, published as:
+The current release is **1.29.2**, published as:
 
 - `https://webnotes.work/os` (download page) and
   `https://webnotes.work/api/os/iso` (the ISO binary, public, no login).
-- GitHub release `c4mandry/PromptLi_os` tag `v1.29.1`, with the ISO **and**
-  the kernel `.deb` packages as assets.
+- GitHub release `c4mandry/PromptLi_os` tag `v1.29.2`.
+
+1.29.2 fixed the AUR layer end-to-end: the pacman wrapper now installs
+PKGBUILD makedepends (mapped Arch→Debian) before building, makedeb-rs and
+mist are rebuilt from source against trixie's apt with a serial-console
+progress fix, and mist is vendored so AUR tooling never depends on
+proget.makedeb.org being up (see §9).
 
 Default live credentials: **`promptli` / `promptli`**. Root is **locked** by
 default unless the installer sets a root password.
