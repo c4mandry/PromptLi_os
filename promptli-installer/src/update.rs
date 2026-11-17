@@ -188,10 +188,17 @@ fn apply_release(version: &str, site: &str) -> io::Result<()> {
         ],
     );
 
-    // Fix permissions on the extracted binaries.
+    // Fix permissions on the extracted binaries and recreate the Arch-style
+    // libalpm.so symlink + pacman db directory that AUR helpers (yay/paru)
+    // need at runtime.
     proc::run_capture_combined(
         "sh",
-        &["-c", "chmod +x /usr/local/bin/aido /usr/local/bin/pacman /usr/local/bin/promptli* /usr/local/bin/locakhost 2>/dev/null || true"],
+        &["-c", "chmod +x /usr/local/bin/aido /usr/local/bin/pacman /usr/local/bin/promptli* /usr/local/bin/locakhost 2>/dev/null || true; \
+                   ALPM=$(find /usr/lib -name 'libalpm.so.*' 2>/dev/null | head -1); \
+                   if [ -n \"$ALPM\" ] && [ ! -e \"${ALPM%.so.*}.so\" ] && [ ! -e /usr/lib/x86_64-linux-gnu/libalpm.so ]; then \
+                       ln -sf \"$ALPM\" /usr/lib/x86_64-linux-gnu/libalpm.so; \
+                   fi; \
+                   mkdir -p /var/lib/pacman/local /var/lib/pacman/sync"],
     );
 
     // Kernel updates: the release layer now ships /boot + /lib/modules. When

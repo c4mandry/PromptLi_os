@@ -541,12 +541,16 @@ case "$1" in
         ;;
     -S)
         shift
+        skip_next=""
         for pkg in "$@"; do
             # yay/paru pass pacman flags here; they are accepted and
             # ignored (--needed: apt-get install of an installed package is
-            # already a no-op; --asdeps: recorded below).
+            # already a no-op; --asdeps: recorded below). --config takes a
+            # value that must be skipped too.
+            if [ "$skip_next" = 1 ]; then skip_next=""; continue; fi
             case "$pkg" in
-                --asdeps|--needed|--noconfirm|--noprogressbar|--disable-download-timeout|--overwrite=*) continue ;;
+                --config|--root|--dbpath|--cachedir) skip_next=1; continue ;;
+                --asdeps|--needed|--noconfirm|--noprogressbar|--disable-download-timeout|--overwrite=*|--) continue ;;
             esac
             if apt-cache show "$pkg" >/dev/null 2>&1; then
                 apt-get install -y "$pkg"
@@ -586,9 +590,12 @@ case "$1" in
         # with makepkg and hand the result to `pacman -U`. The archive is
         # converted on the fly to a .deb and installed via dpkg.
         shift
+        skip_next=""
         for f in "$@"; do
+            if [ "$skip_next" = 1 ]; then skip_next=""; continue; fi
             case "$f" in
-                --asdeps|--needed|--noconfirm|--noprogressbar|--disable-download-timeout|--overwrite=*) continue ;;
+                --config|--root|--dbpath|--cachedir) skip_next=1; continue ;;
+                --asdeps|--needed|--noconfirm|--noprogressbar|--disable-download-timeout|--overwrite=*|--) continue ;;
             esac
             [ -f "$f" ] || { echo "error: package not found: $f" >&2; continue; }
             pkginfo=$(bsdtar -xOf "$f" .PKGINFO 2>/dev/null || true)
@@ -640,6 +647,7 @@ case "$1" in
         shift
         for p in "$@"; do
             case "$p" in -*) continue ;; esac
+            [ -n "$p" ] || continue
             dpkg -s "$p" >/dev/null 2>&1 || echo "$p"
         done
         ;;
@@ -680,14 +688,18 @@ case "$1" in
         ;;
     -Qi)
         shift
+        # AUR helpers sometimes probe with an empty package name; answer
+        # nothing and succeed so their exit codes stay clean.
+        [ -n "${1:-}" ] || exit 0
         dpkg -s "$1" 2>/dev/null || { echo "error: package '$1' was not found" >&2; exit 1; }
         ;;
     -Qo)
         shift
+        [ -n "${1:-}" ] || exit 0
         dpkg -S "$1" 2>/dev/null || { echo "error: No package owns $1" >&2; exit 1; }
         ;;
     -Qs)
-        dpkg -l | grep "$2"
+        dpkg -l | grep "${2:-}"
         ;;
     -R|-Rns|-Rs|-Rdd)
         shift
@@ -1214,6 +1226,14 @@ if [ -f "$ZH" ] && [ -s "$ZH" ]; then
 fi
 # aido's light deps (PyYAML, requests) come from Debian packages; no pip
 # install is needed at first boot.
+# AUR helpers (yay/paru) need the unversioned libalpm.so symlink — Debian
+# only ships libalpm.so.15 — and an initialized pacman db directory.
+ALPM=$(find /usr/lib -name 'libalpm.so.*' 2>/dev/null | head -1)
+if [ -n "$ALPM" ] && [ ! -e "${ALPM%.so.*}.so" ] && [ ! -e /usr/lib/x86_64-linux-gnu/libalpm.so ]; then
+    ln -sf "$ALPM" /usr/lib/x86_64-linux-gnu/libalpm.so
+fi
+mkdir -p /var/lib/pacman/local /var/lib/pacman/sync
+[ -f /var/lib/pacman/local/ALPM_DB_VERSION ] || echo 9 > /var/lib/pacman/local/ALPM_DB_VERSION
 # AUR: if mist isn't installed yet, prefer the vendored trixie build
 # (vendor/mist/mist) so AUR tooling works even when the makedeb repo is
 # down; the repo install is only an upgrade path.
@@ -1309,6 +1329,21 @@ fi
 # mist is vendored as a trixie-built binary too (vendor/mist/mist), so AUR
 # tooling never depends on the makedeb repo (proget.makedeb.org) being up.
 echo "  [*] Setting up AUR support (makedeb + mist)..."
+# AUR helpers (yay/paru) link against the unversioned libalpm.so via cgo.
+# Debian only ships libalpm.so.15 in the runtime package, so create the
+# Arch-style symlink — without it, yay builds but fails to start with
+# "libalpm.so: cannot open shared object file".
+ALPM=$(find /usr/lib -name 'libalpm.so.*' 2>/dev/null | head -1)
+if [ -n "$ALPM" ] && [ ! -e "${ALPM%.so.*}.so" ] && [ ! -e /usr/lib/x86_64-linux-gnu/libalpm.so ]; then
+    ln -sf "$ALPM" /usr/lib/x86_64-linux-gnu/libalpm.so
+    echo "  [✓] libalpm.so symlink for AUR helpers"
+fi
+# ...and give ALPM a database to open: AUR helpers initialize a pacman
+# handle even though apt is the real backend, and fail with
+# "Failed to create database" / "newer/older format" unless the local db
+# exists with the ALPM_DB_VERSION marker (9 for pacman 7.x).
+mkdir -p /var/lib/pacman/local /var/lib/pacman/sync
+[ -f /var/lib/pacman/local/ALPM_DB_VERSION ] || echo 9 > /var/lib/pacman/local/ALPM_DB_VERSION
 VENDOR_DEB=$(find /opt/promptli/vendor/makedeb -name '*.deb' 2>/dev/null | head -1)
 if [ -n "$VENDOR_DEB" ] && ! command -v makedeb >/dev/null 2>&1; then
     # --force-overwrite: Debian's makepkg (a pacman dep) also ships
