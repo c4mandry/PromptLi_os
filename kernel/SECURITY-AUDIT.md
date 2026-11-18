@@ -4,13 +4,13 @@ Date: 2026-10-31 · Scope: the kernel shipped in promptLi OS 1.28.x
 (`6.12.113+deb13-amd64`, Debian 13 base) and the replacement promptLi
 performance kernel built from **6.12.115** (latest 6.12 LTS) with **BORE**.
 
-**Update 2026-11-17:** the kernel was rebased to **6.12.118** (the latest
-6.12 LTS, released the same day) for promptLi OS 1.29.3 — three stable
-releases (116/117/118) of upstream fixes on top of 6.12.115. The config,
-BORE patch (7.0.0, stable) and hardening set are unchanged; the patch
-applies to 6.12.118 with zero fuzz (verified by dry-run). The audit below
-remains valid — the 6.12.113→115 delta analysis is historical; 115→118 adds
-only upstream stable fixes on the same code base.
+**Update 2026-11-18 (1.31.0):** the kernel moved to **7.3.5** (7.x series,
+per the user's request for the newer "7" kernel) with the BORE 7.0.0 patch
+(0001-linux7.3-rc2, applies to 7.3.5 with zero fuzz — dry-run verified).
+The hardening/performance profile is unchanged. NOTE: 7.x is the current
+stable series, not the 6.12 LTS — 7.x gets more frequent releases; rebuild
+monthly with `build_kernel.sh` (one command). The 6.12.118 build remains the
+LTS fallback if 7.x ever regresses.
 
 This document is the result of downloading the kernel source, diffing the
 stable releases, auditing the build configuration and rebuilding with

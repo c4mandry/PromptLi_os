@@ -2,8 +2,8 @@
 
 A CachyOS-style performance kernel for promptLi OS: **BORE scheduler**, full
 preemption, 1000 Hz, `-march=x86-64-v3`, MGLRU, zswap (zstd), TCP **BBR**,
-and a hardening profile. Based on the **latest 6.12 LTS** (6.12.118 at the
-time of writing), i.e. with all stable security fixes applied.
+and a hardening profile. Based on the **7.3.5** (the 7.x series, per user request — see the
+SECURITY-AUDIT note about 7.x vs 6.12 LTS), i.e. with all stable security fixes applied.
 
 See [`SECURITY-AUDIT.md`](SECURITY-AUDIT.md) for the audit that motivates the
 build (1,102 upstream commits and 399 security-relevant fixes are missing from
@@ -17,24 +17,24 @@ sudo apt install build-essential bison flex libssl-dev libelf-dev \
                  dwarves xz-utils dpkg-dev fakeroot debhelper
 
 cd PromptLi_os/kernel
-./build_kernel.sh                 # builds 6.12.118 → .deb packages
+./build_kernel.sh                 # builds 7.3.5 → .deb packages
 # or a different version / CPU level:
-VERSION=6.12.118 MARCH=x86-64-v2 ./build_kernel.sh
+VERSION=7.3.5 MARCH=x86-64-v2 ./build_kernel.sh
 ```
 
 Packages land in `$WORKDIR` (default `/var/tmp/promptli-kernel`):
 
 ```
-linux-image-6.12.118-promptli_...deb
-linux-headers-6.12.118-promptli_...deb
+linux-image-7.3.5-promptli_...deb
+linux-headers-7.3.5-promptli_...deb
 linux-libc-dev-...deb
 ```
 
 Install and boot:
 
 ```sh
-sudo dpkg -i /var/tmp/promptli-kernel/linux-image-6.12.118-promptli_*.deb \
-             /var/tmp/promptli-kernel/linux-headers-6.12.118-promptli_*.deb
+sudo dpkg -i /var/tmp/promptli-kernel/linux-image-7.3.5-promptli_*.deb \
+             /var/tmp/promptli-kernel/linux-headers-7.3.5-promptli_*.deb
 sudo update-grub
 sudo reboot
 ```
@@ -74,12 +74,12 @@ sudo sysctl kernel.sched_burst_smoothness=3
 Drop the built `linux-image-*.deb` into the build and let the ISO ship it:
 
 ```sh
-PROMPTLI_KERNEL_DEB=/var/tmp/promptli-kernel/linux-image-6.12.118-promptli_amd64.deb \
+PROMPTLI_KERNEL_DEB=/var/tmp/promptli-kernel/linux-image-7.3.5-promptli_amd64.deb \
   sudo -E bash ../build_promptli.sh
 ```
 
 (Integration point: the chroot hook installs the .deb and live-build picks up
-`/boot/vmlinuz-6.12.118-promptli` for the ISO. This path is opt-in so the
+`/boot/vmlinuz-7.3.5-promptli` for the ISO. This path is opt-in so the
 default ISO stays on Debian's signed kernel until the custom one is validated.)
 
 ## Rebuilding for a new stable release
