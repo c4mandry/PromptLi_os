@@ -28,20 +28,20 @@
 # ─────────────────────────────────────────────────────────────────────────────
 set -eu
 
-VERSION="${1:-${VERSION:-6.12.115}}"
+VERSION="${1:-${VERSION:-7.3.5}}"
 MARCH="${MARCH:-x86-64-v3}"
 JOBS="${JOBS:-4}"
 BASE_CONFIG="${BASE_CONFIG:-auto}"
 SURFACE="${SURFACE:-1}"
 WORKDIR="${WORKDIR:-/var/tmp/promptli-kernel}"
 INSTALL="${INSTALL:-0}"
-BORE_COMMIT="${BORE_COMMIT:-1e2f57ad74e8b8b1d315c03b7abd8d74e40448b4}"
+BORE_COMMIT="${BORE_COMMIT:-8e1b3d4081e4}"
 
 KMAJOR="${VERSION%%.*}"
 KSRC="linux-$VERSION"
 TARBALL="$KSRC.tar.xz"
 URL="https://cdn.kernel.org/pub/linux/kernel/v$KMAJOR.x/$TARBALL"
-BORE_URL="https://raw.githubusercontent.com/firelzrd/bore-scheduler/$BORE_COMMIT/patches/stable/0001-linux6.12.37-bore-7.0.0.patch"
+BORE_URL="https://raw.githubusercontent.com/firelzrd/bore-scheduler/$BORE_COMMIT/patches/stable/0001-linux7.3-rc2-bore-7.0.0.patch"
 
 log() { printf '\033[1;36m▸\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31m✗\033[0m %s\n' "$*" >&2; exit 1; }
