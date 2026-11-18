@@ -1,7 +1,7 @@
 # promptLi OS — Complete Project Handoff
 
 > **Audience:** the next AI (or developer) taking over this project.
-> **Last updated:** 2026-11-18, at release **1.30.0**.
+> **Last updated:** 2026-11-18, at release **1.30.1**.
 > **Read this whole document before touching anything.** It explains what the
 > project is, how every moving part works, where things live, how to build,
 > test and ship, and the traps that have already cost previous sessions hours.
@@ -37,7 +37,7 @@ The current release is **1.30.0**, published as:
 
 - `https://webnotes.work/os` (download page) and
   `https://webnotes.work/api/os/iso` (the ISO binary, public, no login).
-- GitHub release `c4mandry/PromptLi_os` tag `v1.30.0` (ISO + kernel `.deb`s).
+- GitHub release `c4mandry/PromptLi_os` tag `v1.30.1` (ISO + kernel `.deb`s).
 
 Release trail: 1.29.2 fixed the AUR layer end-to-end (makedepends install,
 trixie-built makedeb-rs/mist, vendored mist — §9). 1.29.3 rebased the kernel
