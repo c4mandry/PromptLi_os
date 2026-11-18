@@ -193,6 +193,9 @@ build-essential binutils fakeroot file gettext gawk libarchive-tools lsb-release
 # alpm-sys (yay/paru) needs at BUILD time; its .pc Requires chain needs
 # libarchive-dev, libcurl4-openssl-dev and libgpgme-dev.
 libssl-dev pkgconf libalpm-dev libarchive-dev libcurl4-openssl-dev libgpgme-dev
+# rustup: trixie's rustc (1.85) is too old for current paru/rust AUR
+# packages (>=1.88). `rustup default stable` installs a current toolchain.
+rustup
 
 # Python (for aido, the promptLi assistant & locakHost CLI tools)
 python3 python3-pip python3-venv python3-yaml python3-requests
