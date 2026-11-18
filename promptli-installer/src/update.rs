@@ -2,7 +2,7 @@
 //!
 //! promptLi OS has two update layers:
 //!   1. Debian/apt packages (and AUR via the pacman wrapper) — the base OS.
-//!   2. The promptLi release layer (aido, config, scripts, installer, the
+//!   2. The promptLi release layer (config, scripts, installer, the
 //!      OS version string) — shipped inside the ISO and updated from the
 //!      website's `/api/os/latest` manifest.
 //!
@@ -118,7 +118,7 @@ pub fn run_apply(state: Option<InstallState>, _dest: &str) -> io::Result<i32> {
 /// Download the new ISO and apply the promptLi layer in place.
 ///
 /// The ISO's live filesystem (squashfs under live/) is extracted and the
-/// promptLi-owned paths (aido, config, /usr/local/bin scripts, installer,
+/// promptLi-owned paths (config, /usr/local/bin scripts, installer,
 /// and the os-release version) are copied over the running system — the
 /// same "restore from ISO" path promptli-norm uses. This never repartitions
 /// or touches the bootloader; it only refreshes the promptLi layer.
@@ -150,17 +150,17 @@ fn apply_release(version: &str, site: &str) -> io::Result<()> {
     // Unsquash the promptLi-owned paths into / (overwrites in place).
     // /etc/os-release is handled separately below so the fast/norm mode
     // suffix survives the upgrade.
-    let paths = "opt/aido opt/promptli etc/fastfetch etc/skel etc/zsh \
+    let paths = "opt/promptli etc/fastfetch etc/skel etc/zsh \
                  etc/promptli/autostart.d \
                  etc/profile.d/promptli-version.sh etc/profile.d/promptli-path.sh \
-                 usr/local/bin/aido usr/local/bin/pacman \
+                 usr/local/bin/pacman \
                  usr/local/bin/promptli usr/local/bin/promptli-term usr/local/bin/promptli-kb \
                  usr/local/bin/promptli-fast usr/local/bin/promptli-norm \
                  usr/local/bin/promptli-install usr/local/bin/promptli-update \
                  usr/local/bin/promptli-getty usr/local/bin/locakhost \
                  usr/local/bin/mist usr/share/makedeb/makedeb-rs \
                  boot lib/modules \
-                 usr/local/bin/starship usr/share/oh-my-zsh usr/share/aido";
+                 usr/local/bin/starship usr/share/oh-my-zsh";
     let out = proc::run_capture_combined(
         "sh",
         &["-c", &format!("unsquashfs -f -no-progress -d / {sq} {paths} 2>&1")],
@@ -193,7 +193,7 @@ fn apply_release(version: &str, site: &str) -> io::Result<()> {
     // need at runtime.
     proc::run_capture_combined(
         "sh",
-        &["-c", "chmod +x /usr/local/bin/aido /usr/local/bin/pacman /usr/local/bin/promptli* /usr/local/bin/locakhost 2>/dev/null || true; \
+        &["-c", "chmod +x /usr/local/bin/pacman /usr/local/bin/promptli* /usr/local/bin/locakhost 2>/dev/null || true; \
                    ALPM=$(find /usr/lib -name 'libalpm.so.*' 2>/dev/null | head -1); \
                    if [ -n \"$ALPM\" ] && [ ! -e \"${ALPM%.so.*}.so\" ] && [ ! -e /usr/lib/x86_64-linux-gnu/libalpm.so ]; then \
                        ln -sf \"$ALPM\" /usr/lib/x86_64-linux-gnu/libalpm.so; \

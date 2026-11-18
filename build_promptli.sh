@@ -31,7 +31,7 @@ BUILD_DIR="/var/tmp/promptli-build-${VERSION}"
 OUTPUT_DIR="${PROMPTLI_OUTPUT_DIR:-$HOME/promptli-os-output}"
 
 # Absolute path of this repo — captured BEFORE any `cd` so the build can
-# find sibling sources (aido/, the Rust installer binary) from anywhere.
+# find sibling sources (the Rust installer binary) from anywhere.
 SCRIPT_DIR_REPO="$(cd "$(dirname "$0")" && pwd)"
 
 # ── Check that we are on x86_64 ──────────────────────────
@@ -197,8 +197,8 @@ libssl-dev pkgconf libalpm-dev libarchive-dev libcurl4-openssl-dev libgpgme-dev
 # packages (>=1.88). `rustup default stable` installs a current toolchain.
 rustup
 
-# Python (for aido, the promptLi assistant & locakHost CLI tools)
-python3 python3-pip python3-venv python3-yaml python3-requests
+# Python (locakHost CLI tools + general scripting)
+python3 python3-pip python3-venv
 
 # Rust runtime is NOT required — the installer ships as a static-ish binary.
 PACKAGES
@@ -209,7 +209,7 @@ echo "[*] Creating promptLi project files..."
 PROJECT_DIR="$BUILD_DIR/promptli-project"
 mkdir -p "$PROJECT_DIR"/tools
 
-# GUI assistant removed: promptLi OS is terminal-first; aido is the AI (see /opt/aido).
+# No GUI assistant: promptLi OS is terminal-first and minimal.
 
 
 # --- locakHost ---
@@ -262,8 +262,8 @@ cp "$PROJECT_DIR/tools/locakhost.py" "$INCLUDES/opt/promptli/tools/"
 mkdir -p "$INCLUDES/usr/local/bin"
 cat > "$INCLUDES/usr/local/bin/promptli" << 'X'; chmod +x "$INCLUDES/usr/local/bin/promptli"
 #!/bin/sh
-# Legacy name kept for muscle memory; aido is the promptLi OS AI assistant.
-exec /usr/local/bin/aido "$@"
+# Quick pointer to the promptLi tooling.
+echo "promptLi OS — packages: pacman -S <pkg> (AUR included); updates: pacman -Syu"
 X
 cat > "$INCLUDES/usr/local/bin/locakhost" << 'X'; chmod +x "$INCLUDES/usr/local/bin/locakhost"
 #!/bin/sh
@@ -271,12 +271,12 @@ exec python3 /opt/promptli/tools/locakhost.py "$@"
 X
 
 # ── promptli-fast / promptli-norm: bloat mode switch ──────
-# FAST mode strips almost everything non-essential (aido, python tools, zsh,
+# FAST mode strips almost everything non-essential (python tools, zsh,
 # fbterm, docs, extra packages) but ALWAYS keeps AUR support (pacman/makedeb/
 # mist), the installer/updater, and networking. zsh is replaced with bash;
 # systemd stays as PID1 (removing it wholesale would break login/network),
 # but its optional timers/services are masked for a faster, lighter boot.
-# NORM mode restores everything — packages from the internet, aido + tools
+# NORM mode restores everything — packages from the internet, tools
 # from the live ISO or a fresh ISO download from the website.
 cat > "$INCLUDES/usr/local/bin/promptli-fast" << 'X'; chmod +x "$INCLUDES/usr/local/bin/promptli-fast"
 #!/bin/sh
@@ -291,7 +291,7 @@ if [ -e /etc/promptli/fast ]; then
     exit 0
 fi
 
-echo "promptLi OS → FAST mode (removing aido, zsh, python tools, docs ...)"
+echo "promptLi OS → FAST mode (removing zsh, python tools, docs ...)"
 
 # AUR support + installer must never be removed by the purge/autoremove.
 apt-mark manual pacman-package-manager makedeb makedeb-beta mist build-essential gnupg \
@@ -309,9 +309,9 @@ apt-get autoremove -y --purge -qq 2>/dev/null || true
 apt-get clean -qq 2>/dev/null || true
 
 # 2. Remove the AI assistant + python-based extras.
-rm -rf /opt/aido /opt/promptli/tools /opt/promptli/promptli-wallpaper.py
+rm -rf /opt/promptli/tools /opt/promptli/promptli-wallpaper.py
 rm -rf /usr/share/oh-my-zsh /usr/local/bin/starship
-rm -f /usr/local/bin/aido /usr/local/bin/promptli /usr/local/bin/locakhost /usr/local/bin/promptli-term
+rm -f /usr/local/bin/promptli /usr/local/bin/locakhost /usr/local/bin/promptli-term
 rm -f /etc/skel/.fbtermrc /root/.fbtermrc 2>/dev/null
 
 # 3. zsh → bash. Use usermod (NOT chsh): once zsh is purged it vanishes
@@ -353,7 +353,7 @@ touch /etc/promptli/fast
 rm -f /etc/promptli/norm
 
 echo ""
-echo "✅ FAST mode active — aido, zsh, python tools, docs removed;"
+echo "✅ FAST mode active — zsh, python tools, docs removed;"
 echo "   pacman/AUR kept; systemd services masked; one plain getty."
 echo "   Reboot for full effect. Restore with: promptli-norm"
 X
@@ -361,7 +361,7 @@ X
 cat > "$INCLUDES/usr/local/bin/promptli-norm" << 'X'; chmod +x "$INCLUDES/usr/local/bin/promptli-norm"
 #!/bin/sh
 # promptLi OS — NORM mode: restore everything promptli-fast removed.
-# Packages come from the internet (apt); aido + tools come from the live
+# Packages come from the internet (apt); tools come from the live
 # ISO when booted from it, otherwise a fresh ISO is downloaded from the
 # website.
 set -eu
@@ -372,7 +372,7 @@ if [ ! -e /etc/promptli/fast ]; then
     exit 0
 fi
 
-echo "promptLi OS → NORM mode (restoring aido, zsh, tools ...)"
+echo "promptLi OS → NORM mode (restoring zsh, tools ...)"
 
 # 1. Reinstall packages from the internet.
 apt-get update -qq
@@ -383,13 +383,13 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
     python3 python3-pip python3-venv python3-yaml python3-requests \
     man-db manpages unzip p7zip-full htop 2>/dev/null || true
 
-# 2. Restore aido + tools: live ISO first, else download the ISO.
+# 2. Restore tools: live ISO first, else download the ISO.
 SQS=""
 [ -f /run/live/medium/live/filesystem.squashfs ] && SQS=/run/live/medium/live/filesystem.squashfs
 if [ -z "$SQS" ]; then
     ISO=/var/tmp/promptli-restore.iso
     MNT=/var/tmp/pl-iso-mnt
-    echo "Downloading promptLi OS ISO to restore aido + tools ..."
+    echo "Downloading promptLi OS ISO to restore tools ..."
     curl -fL --retry 2 -o "$ISO" "https://webnotes.work/api/os/iso" \
         || wget -O "$ISO" "https://webnotes.work/api/os/iso" || true
     if [ -s "$ISO" ]; then
@@ -400,11 +400,11 @@ if [ -z "$SQS" ]; then
 fi
 if [ -n "$SQS" ]; then
     unsquashfs -f -no-progress -d / "$SQS" \
-        opt/aido opt/promptli/tools \
-        usr/local/bin/aido usr/local/bin/locakhost usr/local/bin/promptli \
+        opt/promptli/tools \
+        usr/local/bin/locakhost usr/local/bin/promptli \
         usr/local/bin/promptli-term usr/local/bin/promptli-kb \
-        usr/local/bin/starship usr/share/oh-my-zsh usr/share/aido 2>/dev/null || true
-    chmod +x /usr/local/bin/aido /usr/local/bin/locakhost \
+        usr/local/bin/starship usr/share/oh-my-zsh 2>/dev/null || true
+    chmod +x /usr/local/bin/locakhost \
         /usr/local/bin/promptli /usr/local/bin/promptli-term \
         /usr/local/bin/promptli-kb /usr/local/bin/starship 2>/dev/null || true
 fi
@@ -455,7 +455,7 @@ for KEY in PRETTY_NAME VERSION; do
 done
 
 echo ""
-echo "✅ NORM mode restored — aido, zsh, tools back; apt timers re-enabled."
+echo "✅ NORM mode restored — zsh, tools back; apt timers re-enabled."
 echo "   fastfetch now shows '(norm)'. Reboot for full effect."
 X
 
@@ -831,27 +831,6 @@ else
     echo "[!] Warning: installer binary not found at $INSTALLER_SRC (run cargo build --release first)"
 fi
 
-# ── AIDO: terminal-first local AI assistant ────────────────
-# Ships from the aido/ source tree (GUI/tray/voice frontends removed).
-AIDO_SRC="$SCRIPT_DIR_REPO/aido"
-if [ -d "$AIDO_SRC/src" ]; then
-    mkdir -p "$INCLUDES/opt/aido" "$INCLUDES/usr/share/aido"
-    cp -r "$AIDO_SRC/src" "$AIDO_SRC/config" "$INCLUDES/opt/aido/"
-    cp "$AIDO_SRC/requirements.txt" "$AIDO_SRC/setup.py" "$INCLUDES/opt/aido/" 2>/dev/null || true
-    # Built-in roles (aichat-style: .role coder / .role shell).
-    if [ -d "$AIDO_SRC/roles" ]; then
-        cp -r "$AIDO_SRC/roles" "$INCLUDES/usr/share/aido/roles"
-    fi
-    cat > "$INCLUDES/usr/local/bin/aido" << 'X'; chmod +x "$INCLUDES/usr/local/bin/aido"
-#!/bin/sh
-# AIDO — local, private AI assistant (terminal edition).
-exec python3 /opt/aido/src/aido.py "$@"
-X
-    echo "[✓] Bundled AIDO assistant from $AIDO_SRC"
-else
-    echo "[!] Warning: aido/ source tree not found — assistant not bundled"
-fi
-
 # ── Vendored packages (makedeb .deb for AUR support) ────
 if [ -d "$SCRIPT_DIR_REPO/vendor" ]; then
     mkdir -p "$INCLUDES/opt/promptli/vendor"
@@ -897,7 +876,6 @@ cat > "$INCLUDES/etc/motd" << X
 
   promptLi OS ${VERSION} (L1-433) - minimal server-focused Debian
 
-  Assistant:  aido             AI:           aido chat
   Packages:   pacman -S pkg    AUR:          pacman -S <aur-pkg>
   Update:     sudo apt upgrade OR sudo pacman -Syu
   Installer:  promptli-install     Shell:    zsh
@@ -1269,7 +1247,7 @@ chmod +x "$INCLUDES/etc/promptli/autostart.d/15-keymap.sh"
 # ── First-boot setup service ────────────────────────────────
 cat > "$INCLUDES/opt/promptli/setup.sh" << 'X'; chmod +x "$INCLUDES/opt/promptli/setup.sh"
 #!/bin/sh
-# promptLi first-boot setup: user, zsh default, aido deps, AUR tooling.
+# promptLi first-boot setup: user, zsh default, AUR tooling.
 if ! id promptli >/dev/null 2>&1; then
     useradd -m -s /usr/bin/zsh -G sudo,netdev,video promptli
     echo "promptli:promptli" | chpasswd
@@ -1292,8 +1270,7 @@ if [ -f "$ZH" ] && [ -s "$ZH" ]; then
         chown promptli:promptli "$ZH" 2>/dev/null || true
     fi
 fi
-# aido's light deps (PyYAML, requests) come from Debian packages; no pip
-# install is needed at first boot.
+# No extra Python deps are needed at first boot.
 # AUR helpers (yay/paru) need the unversioned libalpm.so symlink — Debian
 # only ships libalpm.so.15 — and an initialized pacman db directory.
 ALPM=$(find /usr/lib -name 'libalpm.so.*' 2>/dev/null | head -1)
@@ -1684,13 +1661,12 @@ fi
 
 # ── Permissions ─────────────────────────────────────────
 echo "  [*] Fixing permissions..."
-chown -R root:root /opt/promptli /opt/aido
-chmod +x /usr/local/bin/promptli /usr/local/bin/locakhost /usr/local/bin/aido
+chown -R root:root /opt/promptli
+chmod +x /usr/local/bin/promptli /usr/local/bin/locakhost
 chmod +x /usr/local/bin/pacman /usr/local/bin/promptli-term
 chmod +x /usr/local/bin/promptli-kb
 chmod +x /usr/local/bin/promptli-fast /usr/local/bin/promptli-norm
 chmod +x /opt/promptli/setup.sh
-chmod +x /opt/aido/src/aido.py
 echo "✅ Done."
 HOOK
 chmod +x config/hooks/normal/9999-promptli-customize.hook.chroot
@@ -1766,7 +1742,6 @@ if [ -f "$ISO_PATH" ]; then
   "released_at": "$ISO_DATE",
   "release_notes": [
     "Minimal, bloat-free base — no window manager, no desktop environment",
-    "aido — private, offline local AI assistant (terminal-first)",
     "pacman works: Debian packages via apt, AUR packages built with makedeb",
     "Plain Linux console with a Unicode font (promptli-term enhances it)",
     "zsh with autosuggestions, syntax highlighting, and a git-aware prompt",
