@@ -186,6 +186,10 @@ grub-pc-bin grub-efi-amd64 grub-efi-amd64-bin efibootmgr os-prober
 # These are makedeb's runtime dependencies.
 pacman-package-manager gnupg
 build-essential binutils fakeroot file gettext gawk libarchive-tools lsb-release zstd
+# AUR build essentials: Rust crates link openssl-sys constantly (yay/paru),
+# and Arch's openssl package ships dev files while Debian splits them —
+# libssl-dev + pkgconf make AUR rust/crypto builds work out of the box.
+libssl-dev pkgconf
 
 # Python (for aido, the promptLi assistant & locakHost CLI tools)
 python3 python3-pip python3-venv python3-yaml python3-requests
@@ -528,7 +532,26 @@ install_aur_deps() {
     done
 }
 
+# Strip Arch version constraints (pacman>=7.1 -> pacman) and report whether
+# a dep is a soname dep (libssl.so) that maps to a system library.
+normalize_dep() {
+    printf '%s\n' "$1" | sed 's/[<>=].*//'
+}
+is_soname_dep() {
+    case "$1" in *.so|*.so.*) return 0 ;; *) return 1 ;; esac
+}
+# A soname dep is satisfied when the linker knows the library.
+soname_present() {
+    LD=$(command -v ldconfig 2>/dev/null || echo /sbin/ldconfig)
+    "$LD" -p 2>/dev/null | grep -q "$(basename "$1" | sed 's/\.so.*/.so/')"
+}
+
 NEED_ROOT=1
+# Global flags (--noconfirm etc.) may come BEFORE the operation
+# (makepkg prepends PACMAN_OPTS). Strip them so $1 is the operation.
+while [ "$1" = "--noconfirm" ] || [ "$1" = "--disable-download-timeout" ] || [ "$1" = "--noprogressbar" ]; do
+    shift
+done
 case "$1" in
     -Q*|-Ss*|-Si*|-T*|-V|--version|-h|--help|help|"") NEED_ROOT=0 ;;
 esac
@@ -552,6 +575,13 @@ case "$1" in
                 --config|--root|--dbpath|--cachedir) skip_next=1; continue ;;
                 --asdeps|--needed|--noconfirm|--noprogressbar|--disable-download-timeout|--overwrite=*|--) continue ;;
             esac
+            # Normalize Arch dep names: strip version constraints and skip
+            # soname deps (virtual — the library ships with its package).
+            pkg=$(normalize_dep "$pkg")
+            if is_soname_dep "$pkg"; then
+                soname_present "$pkg" || echo "  [!] unsatisfied soname dep: $pkg (no matching library)" >&2
+                continue
+            fi
             if apt-cache show "$pkg" >/dev/null 2>&1; then
                 apt-get install -y "$pkg"
             else
@@ -644,12 +674,29 @@ case "$1" in
     -T)
         # Print the packages among the arguments that are NOT installed
         # (yay uses this to check which dependencies are missing).
+        # Real pacman exits 127 when any are missing — makepkg's dependency
+        # resolver checks that exit code, so match it. Version constraints
+        # are stripped (pacman>=7.1 -> pacman); soname deps (libssl.so) are
+        # checked against the linker cache.
         shift
+        missing=0
         for p in "$@"; do
             case "$p" in -*) continue ;; esac
             [ -n "$p" ] || continue
-            dpkg -s "$p" >/dev/null 2>&1 || echo "$p"
+            p=$(normalize_dep "$p")
+            if is_soname_dep "$p"; then
+                if ! soname_present "$p"; then
+                    echo "$p"
+                    missing=1
+                fi
+                continue
+            fi
+            if ! dpkg -s "$p" >/dev/null 2>&1; then
+                echo "$p"
+                missing=1
+            fi
         done
+        [ $missing = 0 ] || exit 127
         ;;
     -D)
         # Dependency marking (--asdeps/--asexplicit) — not tracked on the
