@@ -190,8 +190,9 @@ build-essential binutils fakeroot file gettext gawk libarchive-tools lsb-release
 # and Arch's openssl package ships dev files while Debian splits them —
 # libssl-dev + pkgconf make AUR rust/crypto builds work out of the box.
 # libalpm-dev ships libalpm.pc + the unversioned libalpm.so symlink that
-# alpm-sys (yay/paru) needs at BUILD time.
-libssl-dev pkgconf libalpm-dev
+# alpm-sys (yay/paru) needs at BUILD time; its .pc Requires chain needs
+# libarchive-dev, libcurl4-openssl-dev and libgpgme-dev.
+libssl-dev pkgconf libalpm-dev libarchive-dev libcurl4-openssl-dev libgpgme-dev
 
 # Python (for aido, the promptLi assistant & locakHost CLI tools)
 python3 python3-pip python3-venv python3-yaml python3-requests
