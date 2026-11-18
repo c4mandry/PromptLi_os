@@ -23,9 +23,9 @@
 - **AUR compatibility on Debian**: a `pacman` wrapper maps normal packages to
   `apt` and builds AUR packages with `makedeb`/`mist`. `pacman -Syu` performs
   a full system update, including the promptLi release layer.
-- **`aido`**, a local (offline-capable) AI assistant that runs in the
-  terminal, with 35 tools that can manipulate files, packages, services and
-  the network — optionally with root privileges.
+- **No AI assistant** — `aido` was removed from the OS in 1.31.0 (the user
+  asked for a minimal server system). The Python source remains in the
+  `aido/` repo directory for reference, but nothing in the ISO ships it.
 - **A custom performance kernel** (`6.12.118-promptli`) with the **BORE**
   scheduler, full preemption, HZ=1000, `-march=x86-64-v3`, BBR, MGLRU,
   zswap/zstd and an aggressive hardening set (see §12).
@@ -54,7 +54,7 @@ default unless the installer sets a root password.
 >
 > | What | Absolute path | Git remote |
 > |---|---|---|
-> | OS (build script, installer, aido, kernel, docs) | `/home/ufi/promptlix/PromptLi_os` | `github.com/c4mandry/PromptLi_os` |
+> | OS (build script, installer, kernel, docs) | `/home/ufi/promptlix/PromptLi_os` | `github.com/c4mandry/PromptLi_os` |
 > | Website + distribution API | `/home/ufi/Documents/v3.1/cont/v3.1` | `github.com/c4mandry/insight-inweave` |
 >
 > Nothing else is source. Build artifacts (`output/`,
@@ -104,9 +104,8 @@ Remote: `https://github.com/c4mandry/PromptLi_os.git` (branch `main`).
 ```
 PromptLi_os/
 ├── build_promptli.sh          # THE ISO BUILDER (bash, ~1400 lines)
-├── aido/                      # AI assistant source (Python)
-│   ├── src/{aido,agent,repl,tui,tools,secrets,session,roles,utils}.py
-│   ├── config/aido.yaml
+├── aido/                      # AI assistant source (Python) — REMOVED from
+│                              # the OS in 1.31.0; kept in git for reference
 │   ├── roles/{coder.md,shell.md}
 │   ├── tests/                 # pytest suite (82 passing)
 │   ├── requirements.txt
@@ -224,7 +223,7 @@ sudo -n env PROMPTLI_OUTPUT_DIR=/var/tmp/outputXXXX bash build_promptli.sh
    `promptli-installer/target/release/promptli-install` (or `$PROMPTLI_INSTALLER_BIN`).
    The same binary is installed twice: as `promptli-install` and as
    `promptli-update`; it dispatches on `argv[0]`.
-9. **aido** copy from `aido/` to `/opt/aido`, wrapper `/usr/local/bin/aido`.
+9. ~~**aido** copy~~ — removed in 1.31.0 (aido is no longer shipped).
 10. **Vendor** (makedeb `.deb`) → `/opt/promptli/vendor`.
 11. **Optional custom kernel** → `/opt/promptli/vendor/promptli-kernel.deb`
     (installed by the chroot hook, §12.6).
@@ -298,8 +297,7 @@ sudo -n env PROMPTLI_OUTPUT_DIR=/var/tmp/outputXXXX bash build_promptli.sh
 - Arch-style tooling: `pacman-package-manager`, `gnupg`, `build-essential`,
   `binutils`, `fakeroot`, `file`, `gettext`, `gawk`, `libarchive-tools`,
   `lsb-release`, `zstd`.
-- Python (aido/locakhost): `python3 python3-pip python3-venv python3-yaml
-  python3-requests`.
+- Python (locakhost): `python3 python3-pip python3-venv`.
 
 ### 5.4 zsh / fastfetch / console conventions
 
@@ -364,16 +362,16 @@ selected wifi, no cron (masked), no apt-daily timers in fast mode.
 promptLi has **two** update layers:
 
 1. **Debian packages** — `apt upgrade` / `pacman -Su` (the pacman wrapper).
-2. **The promptLi release layer** — aido, scripts, configs, installer,
-   version string. That layer is shipped inside the ISO and applied in place
-   by `promptli-update --apply` (§8).
+2. **The promptLi release layer** — scripts, configs, installer, version
+   string. That layer is shipped inside the ISO and applied in place by
+   `promptli-update --apply` (§8).
 
 ### 6.4 `promptli-fast` / `promptli-norm` (bloat mode switch)
 
 - **`promptli-fast`** (root; `sudo -E`): purges zsh/fzf/eza/bat/ripgrep/fd/
   zoxide/btop/tmux/fonts/python3/man-db/manpages/unzip/p7zip/htop; removes
-  `/opt/aido`, the promptli tools, Oh My Zsh, starship, `aido`,
-  `promptli`, `locakhost`, `promptli-term`; switches user and root shells to
+  the promptli tools, Oh My Zsh, starship, `promptli`, `locakhost`,
+  `promptli-term`; switches user and root shells to
   **bash** with `usermod` (not `chsh` — see §15); masks optional units
   (apt-daily timers, man-db, tmpfiles-clean, e2scrub, fstrim, ModemManager —
   **but not wpa_supplicant**, so wifi keeps working); sets journald caps;
@@ -382,8 +380,8 @@ promptLi has **two** update layers:
   `/etc/promptli/fast`, removes `/etc/promptli/norm`.
   It **keeps** pacman/AUR (makedeb, mist), the installer/updater,
   networking, fastfetch, kernel, bootloader.
-- **`promptli-norm`**: reinstalls packages from the internet, restores aido
-  and the shell/tools from the live ISO squashfs if booted from it,
+- **`promptli-norm`**: reinstalls packages from the internet, restores the
+  shell/tools from the live ISO squashfs if booted from it,
   otherwise downloads the current ISO from `/api/os/iso`; switches shells
   back to zsh; re-enables apt timers; re-applies the build's mask set (but
   unmasks `wpa_supplicant` if it is installed); restores the getty wrapper;
@@ -498,12 +496,13 @@ TUI prints `❌ ERROR: …` and stays on the Done screen. Optional steps
   2. If a newer release exists: download the ISO from
      `<site>/api/os/iso`, mount it (`mount -o loop,ro`), and
      `unsquashfs -f -no-progress -d / <squashfs> <paths>` where `<paths>` is
-     the promptLi-owned set: `opt/aido opt/promptli etc/fastfetch etc/skel
+     the promptLi-owned set: `opt/promptli etc/fastfetch etc/skel
      etc/zsh etc/promptli/autostart.d etc/profile.d/promptli-version.sh
-     etc/profile.d/promptli-path.sh usr/local/bin/{aido,pacman,promptli,
+     etc/profile.d/promptli-path.sh usr/local/bin/{pacman,promptli,
      promptli-term,promptli-kb,promptli-fast,promptli-norm,promptli-install,
-     promptli-update,promptli-getty,locakhost,starship} usr/share/oh-my-zsh
-     usr/share/aido`.
+     promptli-update,promptli-getty,locakhost,starship,mist}
+     usr/share/oh-my-zsh usr/share/makedeb/makedeb-rs` (plus `boot` and
+     `lib/modules` for kernel updates).
   3. `os-release` is handled **separately**: the new file is copied, and the
      old fast/norm suffix is re-inserted **inside the quotes** (the suffix
      must never be appended after the closing quote, and the regex must not
@@ -582,7 +581,13 @@ Known good (verified in QEMU):
 
 ---
 
-## 10. aido — the AI assistant
+## 10. aido — the AI assistant (REMOVED from the OS in 1.31.0)
+
+> The user asked for aido to be deleted. The build no longer ships
+> `/opt/aido`, `/usr/local/bin/aido`, `/usr/share/aido`, or the aido Python
+> deps; MOTD/fastfetch/updater references are gone. The `aido/` source tree
+> stays in git for reference only — do NOT re-add it to the ISO without
+> asking. The documentation below describes the (now unused) source.
 
 ### 10.1 Layout and entry points
 
@@ -904,7 +909,7 @@ drive them with Python (`subprocess` + pipes). Learn these patterns:
 | Live boot + `uname -r` + `sched_bore`/`tcp_congestion_control` | the kernel actually ships and is active |
 | Install + boot on the release ISO | the installed system runs the same kernel |
 | **UEFI boot** (OVMF) and **BIOS boot** (isolinux) of the ISO | bootloader configs resolve the real kernel (see the 1.29.1 GRUB fix); capture a screenshot via QMP `screendump` and check for the login prompt |
-| `aido` pytest (`cd aido && python3 -m pytest tests -q`) | **82 passed, 2 skipped** |
+| `aido` pytest (source still in repo; not shipped) | 82 passed, 2 skipped |
 | `cargo test` in `promptli-installer` | version-ordering test |
 
 ---
