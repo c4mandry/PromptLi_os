@@ -1,7 +1,7 @@
 # promptLi OS — Complete Project Handoff
 
 > **Audience:** the next AI (or developer) taking over this project.
-> **Last updated:** 2026-11-17, at release **1.29.3**.
+> **Last updated:** 2026-11-18, at release **1.30.0**.
 > **Read this whole document before touching anything.** It explains what the
 > project is, how every moving part works, where things live, how to build,
 > test and ship, and the traps that have already cost previous sessions hours.
@@ -33,19 +33,19 @@
   docs, receives enrollment callbacks from the installer, and serves the
   update manifest that installed machines poll.
 
-The current release is **1.29.3**, published as:
+The current release is **1.30.0**, published as:
 
 - `https://webnotes.work/os` (download page) and
   `https://webnotes.work/api/os/iso` (the ISO binary, public, no login).
-- GitHub release `c4mandry/PromptLi_os` tag `v1.29.3` (ISO + kernel `.deb`s).
+- GitHub release `c4mandry/PromptLi_os` tag `v1.30.0` (ISO + kernel `.deb`s).
 
-1.29.2 fixed the AUR layer end-to-end (pacman wrapper installs PKGBUILD
-makedepends mapped Arch→Debian; makedeb-rs and mist rebuilt against trixie's
-apt with a serial-console progress fix; mist vendored — see §9).
-1.29.3 rebased the kernel to **6.12.118** (latest 6.12 LTS), validates the
-keymap in `promptli-kb`, and makes the updater ship `/boot` + `/lib/modules`
-so future kernel upgrades install over `pacman -Syu` (initramfs + GRUB are
-rebuilt when a newer kernel arrives).
+Release trail: 1.29.2 fixed the AUR layer end-to-end (makedepends install,
+trixie-built makedeb-rs/mist, vendored mist — §9). 1.29.3 rebased the kernel
+to **6.12.118** and made the updater ship `/boot` + `/lib/modules` so future
+kernel upgrades install over `pacman -Syu`. **1.30.0 adds native AUR helper
+support**: yay/paru build with makepkg and install via `pacman -U`, which
+converts `.pkg.tar.zst` to `.deb` on the fly — verified end-to-end in QEMU
+(`pacman -S yay`, then `yay -S pfetch`).
 
 Default live credentials: **`promptli` / `promptli`**. Root is **locked** by
 default unless the installer sets a root password.
@@ -568,9 +568,17 @@ Three pieces:
   dpkg "interrupted". Fixed with `saturating_sub` + skip when 0.
   Without this, `pacman -S <aur>` crashes on headless servers.
 
-Known good (verified in QEMU, 1.29.2 test rounds): `pacman -S pfetch` and
-`pacman -S yay` (builds `go`-based yay end-to-end, including the
-makedepends install) both succeed on promptLi.
+Known good (verified in QEMU):
+- `pacman -S pfetch` and `pacman -S yay` (builds `go`-based yay end-to-end,
+  including the makedepends install) — 1.29.2 rounds.
+- **Native AUR (1.30.0)**: on a fresh install, `pacman -S yay` then
+  `yay -S pfetch` — yay builds with makepkg and installs through
+  `pacman -U` (converts .pkg.tar.zst → .deb), both exit 0. yay needs the
+  `libalpm.so` symlink + `/var/lib/pacman/local/ALPM_DB_VERSION=9` (both
+  ship in the base image) or it fails with "Failed to initialize ALPM
+  handle".
+- AUR RPC (aur.archlinux.org) rate-limits per IP — overnight test runs can
+  hit HTTP 429 for a while; yay retries internally.
 
 ---
 
