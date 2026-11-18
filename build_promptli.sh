@@ -614,8 +614,23 @@ case "$1" in
                 else
                     (cd "$tmp" && makedeb -si --no-confirm)
                 fi
+                # Guarantee "installed = runnable": makedeb's own install
+                # step can fail after a successful build (its makedeb-rs
+                # aborts on some consoles), leaving a built .deb that was
+                # never installed. Install any built .debs directly as a
+                # fallback, then verify the package is actually present.
+                if ! dpkg -s "$pkg" >/dev/null 2>&1; then
+                    for DEB in "$tmp"/*.deb; do
+                        [ -f "$DEB" ] || continue
+                        dpkg -i "$DEB" 2>/dev/null || dpkg -i --force-depends "$DEB" 2>/dev/null || true
+                    done
+                fi
                 if dpkg -s "$pkg" >/dev/null 2>&1; then
                     record_aur_pkg "$pkg"
+                    command -v "$pkg" >/dev/null 2>&1 || \
+                        echo "  [!] '$pkg' installed but no '$pkg' binary on PATH" >&2
+                else
+                    echo "  [!] install failed for '$pkg' (no deb produced?)" >&2
                 fi
             fi
         done
