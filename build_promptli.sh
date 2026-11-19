@@ -8,8 +8,11 @@ set -euo pipefail
 
 # Versioning: major is set by hand. Minor counts features/big changes since
 # v1.0.0 (see git history); patch counts every bug fix, however small.
-VERSION="1.31.0"
+VERSION="1.32.2"
 ISO_NAME="promptli-os-${VERSION}-amd64"
+# Set to 1 when PROMPTLI_KERNEL_DEB bundles a custom kernel — the update
+# payload then also ships /boot + /lib/modules so pacman -Syu upgrades it.
+PROMPTLI_KERNEL_SHIPPED=0
 
 echo "================================================"
 echo "  promptLi OS — Native x86_64 ISO Builder"
@@ -594,7 +597,15 @@ case "$1" in
                 echo "-> '$pkg' is not in the Debian repos - building from AUR..."
                 tmp="/tmp/aur-$pkg"
                 rm -rf "$tmp"
-                git clone --depth 1 "https://aur.archlinux.org/$pkg.git" "$tmp"
+                # AUR rate-limits per IP (HTTP 429) and git can fail transiently —
+                # retry a few times with backoff instead of failing outright.
+                for attempt in 1 2 3; do
+                    git clone --depth 1 "https://aur.archlinux.org/$pkg.git" "$tmp" 2>/dev/null && break
+                    echo "  [!] AUR clone attempt $attempt failed - retrying in 10s..."
+                    rm -rf "$tmp"
+                    sleep 10
+                done
+                [ -d "$tmp/.git" ] || { echo "  [!] AUR clone failed after 3 attempts: $pkg" >&2; continue; }
                 # Install deps first (makedeb -s only syncs `depends`;
                 # AUR packages like yay list build tools in makedepends).
                 (cd "$tmp" && install_aur_deps)
@@ -849,6 +860,7 @@ if [ -n "${PROMPTLI_KERNEL_DEB:-}" ]; then
     fi
     mkdir -p "$INCLUDES/opt/promptli/vendor"
     cp "$PROMPTLI_KERNEL_DEB" "$INCLUDES/opt/promptli/vendor/promptli-kernel.deb"
+    PROMPTLI_KERNEL_SHIPPED=1
     echo "[✓] Custom kernel bundled: $(basename "$PROMPTLI_KERNEL_DEB")"
 fi
 
@@ -1721,8 +1733,39 @@ else
     echo "WARNING: no ISO found in build tree."
 fi
 
+# ── Update payload ──────────────────────────────────────
+# The self-updater (promptli-update --apply) downloads this SMALL tarball
+# instead of the full ~1.2 GB ISO. It contains only the promptLi-owned paths
+# (config, /usr/local/bin scripts, makedeb/mist, oh-my-zsh, os-release) plus —
+# only when this release ships a kernel — /boot and /lib/modules. This turns
+# an 18-minute release update into seconds on normal connections.
+UPDATE_NAME="promptli-update-${VERSION}-amd64.tar.zst"
+UPDATE_PATH="$OUTPUT_DIR/$UPDATE_NAME"
+UPDATE_SHA=""
+UPDATE_SIZE=0
+UPDATE_PATHS="opt/promptli etc/fastfetch etc/skel etc/zsh etc/promptli/autostart.d \
+  etc/profile.d/promptli-version.sh etc/profile.d/promptli-path.sh etc/os-release \
+  usr/local/bin/pacman usr/local/bin/promptli usr/local/bin/promptli-term \
+  usr/local/bin/promptli-kb usr/local/bin/promptli-fast usr/local/bin/promptli-norm \
+  usr/local/bin/promptli-install usr/local/bin/promptli-update usr/local/bin/promptli-getty \
+  usr/local/bin/locakhost usr/local/bin/mist usr/local/bin/starship \
+  usr/share/makedeb/makedeb-rs usr/share/oh-my-zsh"
+if [ "$PROMPTLI_KERNEL_SHIPPED" = 1 ]; then
+    UPDATE_PATHS="$UPDATE_PATHS boot lib/modules"
+fi
+if [ -d "$BUILD_DIR/chroot" ]; then
+    echo "[*] Building update payload $UPDATE_NAME ..."
+    # shellcheck disable=SC2086
+    tar --zstd -cf "$UPDATE_PATH" -C "$BUILD_DIR/chroot" $UPDATE_PATHS
+    UPDATE_SHA=$(sha256sum "$UPDATE_PATH" | cut -d' ' -f1)
+    UPDATE_SIZE=$(stat -c %s "$UPDATE_PATH")
+    echo "[✓] Update payload: $(du -h "$UPDATE_PATH" | cut -f1)"
+else
+    echo "[!] chroot missing — update payload skipped (updaters will fall back to the ISO)"
+fi
+
 # (Re)generate the release manifest so the website /api/os/latest always
-# matches the freshly built ISO (sha256 + size are recomputed here).
+# matches the freshly built ISO + update payload (sha256 + size recomputed).
 ISO_PATH="$OUTPUT_DIR/$ISO_NAME.iso"
 if [ -f "$ISO_PATH" ]; then
     ISO_SHA=$(sha256sum "$ISO_PATH" | cut -d' ' -f1)
@@ -1739,10 +1782,18 @@ if [ -f "$ISO_PATH" ]; then
   "iso_url": "/api/os/iso",
   "sha256": "$ISO_SHA",
   "size_bytes": $ISO_SIZE,
+  "update_filename": "$UPDATE_NAME",
+  "update_url": "/api/os/update",
+  "update_sha256": "$UPDATE_SHA",
+  "update_size_bytes": $UPDATE_SIZE,
+  "includes_kernel": $PROMPTLI_KERNEL_SHIPPED,
   "released_at": "$ISO_DATE",
   "release_notes": [
+    "FAST UPDATES: promptli-update now downloads a small update payload (tar.zst) instead of the full ~1.2 GB ISO — release updates take seconds, not ~18 minutes",
+    "Kernel 7.3.5 rebuilt at -march=x86-64 (baseline): runs on EVERY 64-bit x86 CPU, not just Haswell/Zen1+ — measured no performance regression",
+    "AUR installs retry git clones 3x with backoff — survives AUR rate-limiting (HTTP 429) and transient network failures",
     "Minimal, bloat-free base — no window manager, no desktop environment",
-    "pacman works: Debian packages via apt, AUR packages built with makedeb",
+    "pacman works: Debian packages via apt, AUR packages built with makedeb; yay/paru work natively",
     "Plain Linux console with a Unicode font (promptli-term enhances it)",
     "zsh with autosuggestions, syntax highlighting, and a git-aware prompt",
     "systemd-networkd + resolved networking (no NetworkManager bloat)",
@@ -1765,7 +1816,7 @@ fi
 # The web server (running as the invoking user, not root) must be able to
 # write enrollments.jsonl + latest.json into this directory.
 OUT_OWNER="${SUDO_USER:-$(logname 2>/dev/null || echo root)}"
-chown "$OUT_OWNER":"$(id -gn "$OUT_OWNER" 2>/dev/null || echo root)" "$OUTPUT_DIR" "$OUTPUT_DIR/$ISO_NAME.iso" "$OUTPUT_DIR/latest.json" 2>/dev/null || true
+chown "$OUT_OWNER":"$(id -gn "$OUT_OWNER" 2>/dev/null || echo root)" "$OUTPUT_DIR" "$OUTPUT_DIR/$ISO_NAME.iso" "$OUTPUT_DIR/latest.json" "$UPDATE_PATH" 2>/dev/null || true
 
 echo ""
 echo "================================================"

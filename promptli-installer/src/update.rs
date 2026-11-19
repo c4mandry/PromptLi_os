@@ -10,6 +10,11 @@
 //!                               whether a newer promptLi release exists.
 //!   promptli-update --apply   → apt upgrade, AND (if a newer promptLi
 //!                               release exists) download + apply it.
+//!
+//! Since 1.32.0 the release layer is downloaded as a SMALL tar.zst payload
+//! (`/api/os/update`) containing only the promptLi-owned paths — not the
+//! full ~1.2 GB ISO. Releases that predate the payload fall back to the
+//! ISO path automatically.
 
 use crate::common::InstallState;
 use crate::proc;
@@ -90,11 +95,28 @@ pub fn run_apply(state: Option<InstallState>, _dest: &str) -> io::Result<i32> {
     let code = run_apt(&["upgrade", "-y"])?;
 
     // 2. Then the promptLi release layer, if a newer release exists.
-    match newer_release_available(state.as_ref()) {
+    // The manifest is fetched once and reused for both the version check
+    // and the payload download, so a manifest swap mid-update can't race.
+    let site = site_url(state.as_ref());
+    let manifest = crate::http_client::fetch_latest(&site);
+
+    let newer = match manifest.as_ref().and_then(|m| m["version"].as_str()) {
+        Some(latest) => {
+            let current = crate::common::distro_version();
+            if crate::common::compare_version(latest, &current) == std::cmp::Ordering::Greater {
+                Some((latest.to_string(), current))
+            } else {
+                None
+            }
+        }
+        None => None,
+    };
+
+    match newer {
         Some((latest, current)) => {
             println!();
             println!("Upgrading promptLi OS {current} -> {latest} ...");
-            let r = apply_release(&latest, &site_url(state.as_ref()));
+            let r = apply_release(&latest, &site, manifest.as_ref());
             if code == 0 {
                 if let Err(e) = r {
                     eprintln!("warning: promptLi release upgrade failed: {e}");
@@ -115,18 +137,148 @@ pub fn run_apply(state: Option<InstallState>, _dest: &str) -> io::Result<i32> {
     Ok(code)
 }
 
-/// Download the new ISO and apply the promptLi layer in place.
-///
-/// The ISO's live filesystem (squashfs under live/) is extracted and the
-/// promptLi-owned paths (config, /usr/local/bin scripts, installer,
-/// and the os-release version) are copied over the running system — the
-/// same "restore from ISO" path promptli-norm uses. This never repartitions
-/// or touches the bootloader; it only refreshes the promptLi layer.
-fn apply_release(version: &str, site: &str) -> io::Result<()> {
+/// Apply the new release layer: prefer the small update payload; fall back
+/// to the full ISO for releases built before the payload existed.
+fn apply_release(
+    version: &str,
+    site: &str,
+    manifest: Option<&serde_json::Value>,
+) -> io::Result<()> {
+    let has_payload = manifest
+        .and_then(|m| m["update_filename"].as_str())
+        .map(|f| !f.is_empty())
+        .unwrap_or(false);
+
+    if has_payload {
+        apply_update_payload(version, site, manifest.unwrap())
+    } else {
+        apply_from_iso(version, site)
+    }
+}
+
+/// Fast path: download the small tar.zst payload and extract it over `/`.
+/// This is what makes a release update take seconds instead of ~18 minutes.
+fn apply_update_payload(
+    version: &str,
+    site: &str,
+    manifest: &serde_json::Value,
+) -> io::Result<()> {
+    let tarball = "/var/tmp/promptli-update.tar.zst";
+    let expected_sha = manifest["update_sha256"].as_str().unwrap_or("").to_string();
+
+    println!("Downloading promptLi OS {version} update payload ...");
+    let url = format!("{}/api/os/update", site);
+    let dl = proc::run_capture_combined(
+        "sh",
+        &[
+            "-c",
+            &format!("curl -fL --retry 2 -o {tarball} '{url}' 2>&1 || wget -O {tarball} '{url}' 2>&1"),
+        ],
+    );
+    if !dl.is_empty() {
+        eprintln!("{dl}");
+    }
+    if !std::path::Path::new(tarball).is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "update payload download failed",
+        ));
+    }
+
+    // Verify the sha256 when the manifest carries one (corruption guard).
+    if !expected_sha.is_empty() {
+        let got = proc::run_capture_combined(
+            "sh",
+            &["-c", &format!("sha256sum {tarball} | cut -d' ' -f1 | tr -d '\\n'")],
+        );
+        if got.trim() != expected_sha {
+            let _ = std::fs::remove_file(tarball);
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "update payload sha256 mismatch — download corrupted?",
+            ));
+        }
+        println!("  [✓] sha256 verified");
+    }
+
+    // Remember the fast/norm mode BEFORE /etc/os-release gets overwritten.
+    let mode = proc::run_capture_combined(
+        "sh",
+        &[
+            "-c",
+            "sed -n 's/^PRETTY_NAME=\".* \\(fast\\|norm\\)\"$/\\1/p' /etc/os-release | tail -1 | tr -d '\\n'",
+        ],
+    );
+
+    println!("Applying update payload ...");
+    let out = proc::run_capture_combined(
+        "sh",
+        &["-c", &format!("tar --zstd -xf {tarball} -C / 2>&1")],
+    );
+    if !out.is_empty() {
+        eprintln!("{out}");
+    }
+
+    // Re-insert the fast/norm suffix INSIDE the quotes (the suffix must
+    // never be appended after the closing quote — a shipped bug once).
+    let suffix = mode.trim();
+    if !suffix.is_empty() {
+        let suf = format!(" {suffix}");
+        let _ = proc::run_capture_combined(
+            "sh",
+            &[
+                "-c",
+                &format!(
+                    "sed -i -E 's|^(PRETTY_NAME=\"[^\"]*)|\\1{suf}|; s|^(VERSION=\"[^\"]*)|\\1{suf}|' /etc/os-release"
+                ),
+            ],
+        );
+    }
+
+    finish_release_layer();
+    let _ = std::fs::remove_file(tarball);
+    Ok(())
+}
+
+/// Post-extraction steps shared by the payload and ISO paths: binary
+/// permissions, the libalpm symlink + pacman db dirs AUR helpers need, and
+/// the initramfs/grub rebuild when the payload carried a newer kernel.
+fn finish_release_layer() {
+    proc::run_capture_combined(
+        "sh",
+        &["-c", "chmod +x /usr/local/bin/pacman /usr/local/bin/promptli* /usr/local/bin/locakhost 2>/dev/null || true; \
+                   ALPM=$(find /usr/lib -name 'libalpm.so.*' 2>/dev/null | head -1); \
+                   if [ -n \"$ALPM\" ] && [ ! -e \"${ALPM%.so.*}.so\" ] && [ ! -e /usr/lib/x86_64-linux-gnu/libalpm.so ]; then \
+                       ln -sf \"$ALPM\" /usr/lib/x86_64-linux-gnu/libalpm.so; \
+                   fi; \
+                   mkdir -p /var/lib/pacman/local /var/lib/pacman/sync"],
+    );
+
+    // Kernel updates: when the release layer ships a NEWER kernel than the
+    // running one, build its initramfs (the live initrd is live-boot only)
+    // and refresh the bootloader so `pacman -Syu` upgrades the kernel too.
+    proc::run_capture_combined(
+        "sh",
+        &[
+            "-c",
+            "NEWKREL=$(ls /boot/vmlinuz-* 2>/dev/null | sed 's|.*/vmlinuz-||' | sort -V | tail -1); \
+             [ -n \"$NEWKREL\" ] && [ \"$NEWKREL\" != \"$(uname -r)\" ] && { \
+                 echo \"New kernel $NEWKREL found - building initramfs...\"; \
+                 update-initramfs -c -k \"$NEWKREL\" 2>&1 || true; \
+                 update-grub 2>&1 || true; \
+             } || true",
+        ],
+    );
+}
+
+/// Legacy path: download the full ISO and unsquashfs the promptLi-owned
+/// paths. Used only when the manifest has no update payload (releases
+/// before 1.32.0).
+fn apply_from_iso(version: &str, site: &str) -> io::Result<()> {
     let iso = "/var/tmp/promptli-update.iso";
     let mnt = "/var/tmp/promptli-update-mnt";
 
-    println!("Downloading promptLi OS {version} ISO ...");
+    println!("Downloading promptLi OS {version} ISO (no update payload for this release) ...");
     let iso_path = format!("{}/api/os/iso", site);
     let dl = proc::run_capture_combined(
         "sh",
@@ -188,36 +340,7 @@ fn apply_release(version: &str, site: &str) -> io::Result<()> {
         ],
     );
 
-    // Fix permissions on the extracted binaries and recreate the Arch-style
-    // libalpm.so symlink + pacman db directory that AUR helpers (yay/paru)
-    // need at runtime.
-    proc::run_capture_combined(
-        "sh",
-        &["-c", "chmod +x /usr/local/bin/pacman /usr/local/bin/promptli* /usr/local/bin/locakhost 2>/dev/null || true; \
-                   ALPM=$(find /usr/lib -name 'libalpm.so.*' 2>/dev/null | head -1); \
-                   if [ -n \"$ALPM\" ] && [ ! -e \"${ALPM%.so.*}.so\" ] && [ ! -e /usr/lib/x86_64-linux-gnu/libalpm.so ]; then \
-                       ln -sf \"$ALPM\" /usr/lib/x86_64-linux-gnu/libalpm.so; \
-                   fi; \
-                   mkdir -p /var/lib/pacman/local /var/lib/pacman/sync"],
-    );
-
-    // Kernel updates: the release layer now ships /boot + /lib/modules. When
-    // the ISO carries a NEWER kernel than the running one, build its
-    // initramfs (the live initrd is live-boot only) and refresh the
-    // bootloader so `pacman -Syu` upgrades the kernel too, not just
-    // userspace.
-    proc::run_capture_combined(
-        "sh",
-        &[
-            "-c",
-            "NEWKREL=$(ls /boot/vmlinuz-* 2>/dev/null | sed 's|.*/vmlinuz-||' | sort -V | tail -1); \
-             [ -n \"$NEWKREL\" ] && [ \"$NEWKREL\" != \"$(uname -r)\" ] && { \
-                 echo \"New kernel $NEWKREL found - building initramfs...\"; \
-                 update-initramfs -c -k \"$NEWKREL\" 2>&1 || true; \
-                 update-grub 2>&1 || true; \
-             } || true",
-        ],
-    );
+    finish_release_layer();
 
     proc::run_capture_combined("sh", &["-c", "umount /var/tmp/promptli-update-mnt 2>/dev/null || true"]);
     let _ = std::fs::remove_file(iso);

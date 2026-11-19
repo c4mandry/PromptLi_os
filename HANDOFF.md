@@ -1,7 +1,7 @@
 # promptLi OS — Complete Project Handoff
 
 > **Audience:** the next AI (or developer) taking over this project.
-> **Last updated:** 2026-11-18, at release **1.31.0**.
+> **Last updated:** 2026-11-18, at release **1.32.2**.
 > **Read this whole document before touching anything.** It explains what the
 > project is, how every moving part works, where things live, how to build,
 > test and ship, and the traps that have already cost previous sessions hours.
@@ -33,11 +33,12 @@
   docs, receives enrollment callbacks from the installer, and serves the
   update manifest that installed machines poll.
 
-The current release is **1.30.0**, published as:
+The current release is **1.32.2**, published as:
 
-- `https://webnotes.work/os` (download page) and
-  `https://webnotes.work/api/os/iso` (the ISO binary, public, no login).
-- GitHub release `c4mandry/PromptLi_os` tag `v1.31.0` (ISO + kernel `.deb`s).
+- `https://webnotes.work/os` (download page),
+  `https://webnotes.work/api/os/iso` (the ISO binary, public, no login), and
+  `https://webnotes.work/api/os/update` (the small update payload).
+- GitHub release `c4mandry/PromptLi_os` tag `v1.32.2` (ISO + kernel `.deb`s).
 
 Release trail: 1.29.2 fixed the AUR layer end-to-end (makedepends install,
 trixie-built makedeb-rs/mist, vendored mist — §9). 1.29.3 rebased the kernel
@@ -45,7 +46,13 @@ to **6.12.118** and made the updater ship `/boot` + `/lib/modules` so future
 kernel upgrades install over `pacman -Syu`. **1.30.0 adds native AUR helper
 support**: yay/paru build with makepkg and install via `pacman -U`, which
 converts `.pkg.tar.zst` to `.deb` on the fly — verified end-to-end in QEMU
-(`pacman -S yay`, then `yay -S pfetch`).
+(`pacman -S yay`, then `yay -S pfetch`). **1.32.x makes release updates
+fast** (`promptli-update` downloads a small tar.zst payload instead of the
+full ISO), **rebuilds the kernel at baseline `-march=x86-64`** so every
+64-bit x86 CPU is supported (v3 excluded pre-Haswell machines — the cause of
+the "amd64 support got worse" reports), and **retries AUR git clones 3×** to
+survive rate-limiting. `pacman -S yay` / `yay -S pfetch` re-verified on the
+published ISO in QEMU (fresh install from the real ISO, BIOS + UEFI boot).
 
 Default live credentials: **`promptli` / `promptli`**. Root is **locked** by
 default unless the installer sets a root password.
@@ -268,8 +275,12 @@ sudo -n env PROMPTLI_OUTPUT_DIR=/var/tmp/outputXXXX bash build_promptli.sh
       groups sudo,netdev,video);
     - **optional custom kernel install + purge of all Debian kernels**;
     - permissions.
-20. **`lb build`** produces the ISO; the script copies it and regenerates
-    `latest.json` with recalculated sha256/size.
+20. **`lb build`** produces the ISO; the script copies it, **builds the
+    update payload** (`promptli-update-<VERSION>-amd64.tar.zst` from the
+    chroot — kernel paths only when `PROMPTLI_KERNEL_SHIPPED=1`), and
+    regenerates `latest.json` with recalculated sha256/size plus the
+    `update_filename` / `update_sha256` / `update_size_bytes` /
+    `includes_kernel` fields.
 
 ### 5.3 Package list (the important parts)
 
@@ -493,21 +504,29 @@ TUI prints `❌ ERROR: …` and stays on the Done screen. Optional steps
   release exists. Offline → silent.
 - `promptli-update --apply` (also what `pacman -Syu` runs):
   1. `apt-get upgrade -y` (Debian layer).
-  2. If a newer release exists: download the ISO from
-     `<site>/api/os/iso`, mount it (`mount -o loop,ro`), and
-     `unsquashfs -f -no-progress -d / <squashfs> <paths>` where `<paths>` is
-     the promptLi-owned set: `opt/promptli etc/fastfetch etc/skel
-     etc/zsh etc/promptli/autostart.d etc/profile.d/promptli-version.sh
-     etc/profile.d/promptli-path.sh usr/local/bin/{pacman,promptli,
-     promptli-term,promptli-kb,promptli-fast,promptli-norm,promptli-install,
-     promptli-update,promptli-getty,locakhost,starship,mist}
-     usr/share/oh-my-zsh usr/share/makedeb/makedeb-rs` (plus `boot` and
-     `lib/modules` for kernel updates).
-  3. `os-release` is handled **separately**: the new file is copied, and the
-     old fast/norm suffix is re-inserted **inside the quotes** (the suffix
+  2. If a newer release exists: **download the small update payload from
+     `<site>/api/os/update`** (a `tar.zst` containing only the promptLi-owned
+     paths — built by `build_promptli.sh` next to the ISO) and extract it
+     with `tar --zstd -xf … -C /`. The payload's sha256 is verified against
+     `update_sha256` in the manifest before extraction. Releases that predate
+     the payload (manifests without `update_filename`) fall back to the old
+     ISO path automatically. This is what turned an ~18-minute release update
+     into seconds.
+  3. The payload contains: `opt/promptli etc/fastfetch etc/skel etc/zsh
+     etc/promptli/autostart.d etc/profile.d/promptli-version.sh
+     etc/profile.d/promptli-path.sh etc/os-release
+     usr/local/bin/{pacman,promptli,promptli-term,promptli-kb,promptli-fast,
+     promptli-norm,promptli-install,promptli-update,promptli-getty,locakhost,
+     starship,mist} usr/share/oh-my-zsh usr/share/makedeb/makedeb-rs`
+     — plus `boot` and `lib/modules` **only when the release ships a kernel**
+     (`includes_kernel` in the manifest).
+  4. `os-release` handling: the fast/norm mode suffix is read BEFORE the
+     extraction and re-inserted **inside the quotes** afterwards (the suffix
      must never be appended after the closing quote, and the regex must not
      expect parentheses — both were bugs).
-  4. `chmod +x` the binaries, unmount, delete the temporary ISO.
+  5. `chmod +x` the binaries, recreate the libalpm symlink + pacman db dirs,
+     and — when the payload carried a NEWER kernel than the running one —
+     build its initramfs and refresh the bootloader.
 - The **installed version is `VERSION_ID`** in `/etc/os-release`
   (`common.rs::distro_version`), so never put the mode suffix there.
 - The update never touches the bootloader or partitions, and never
@@ -1037,6 +1056,8 @@ and the trixie-built `mist` binary (see §AUR below); `output/` is untracked.
    and a `CC=clang` path in `build_kernel.sh`.
 2. **Multiple CPU-level kernel variants** (x86-64 baseline / v2 / v3 / v4),
    published as separate assets, so older hardware isn't excluded.
+   *(1.32.2 ships the single kernel at baseline `x86-64` — universal support;
+   separate per-level variants remain optional.)*
 3. **Enable the attack-surface trim in the shipped kernel** (`SURFACE=1` is
    already the script default; rebuild + re-test) and re-run the audit.
 4. **Module signing with a distro key** (`MODULE_SIG_FORCE`) once

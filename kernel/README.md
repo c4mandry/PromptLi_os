@@ -65,6 +65,9 @@ sudo sysctl kernel.sched_burst_smoothness=3
 
 - **x86-64-v3** needs Haswell / Zen 1 or newer. For older CPUs build with
   `MARCH=x86-64` (or `x86-64-v2` for ~2009+).
+- **Since 1.32.2 the ISO ships a baseline `MARCH=x86-64` kernel** — it runs
+  on every 64-bit x86 CPU. Rebuild with `MARCH=x86-64-v3` for v3-only
+  codegen (measured: no meaningful difference for server workloads).
 - The kernel is **not signed for UEFI Secure Boot** and **module signature
   enforcement is off** (`MODULE_SIG_FORCE` unset) so out-of-tree modules work.
 - No Clang/ThinLTO/CFI yet — see the audit's follow-ups (§5).
