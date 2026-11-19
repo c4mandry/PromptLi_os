@@ -8,7 +8,7 @@ set -euo pipefail
 
 # Versioning: major is set by hand. Minor counts features/big changes since
 # v1.0.0 (see git history); patch counts every bug fix, however small.
-VERSION="1.32.2"
+VERSION="1.33.0"
 ISO_NAME="promptli-os-${VERSION}-amd64"
 # Set to 1 when PROMPTLI_KERNEL_DEB bundles a custom kernel — the update
 # payload then also ships /boot + /lib/modules so pacman -Syu upgrades it.
@@ -149,6 +149,17 @@ fastfetch fzf eza bat ripgrep fd-find zoxide btop tmux
 # Console utilities
 curl wget git vim htop unzip p7zip-full less
 rsync ca-certificates
+
+# ── Bare-minimum core (every install gets these, regardless of the
+# ── driver-group selection; the installer can never purge them) ──────────
+# initramfs toolkit + busybox: kernel updates and the self-updater's
+# initramfs rebuild depend on them — list them explicitly so no dependency
+# chain accident can ever remove them.
+initramfs-tools busybox
+# Kernel-module tooling and the filesystem repair tools.
+kmod e2fsprogs
+# Hardware diagnostics: lspci / lsusb.
+pciutils usbutils
 # kbd (loadkeys/setfont) + console-setup (console fonts): the plain console
 # keymap/font loading, so KEYMAP= and FONT= in /etc/vconsole.conf work.
 kbd console-setup
@@ -166,10 +177,13 @@ wpasupplicant iw wireless-tools iproute2
 #   audio:     pipewire pipewire-pulse wireplumber alsa-utils
 bluez pipewire pipewire-pulse wireplumber alsa-utils
 
-# Firmware blobs (non-free-firmware): keep the common wifi/bluetooth/audio
-# firmwares so driver groups actually work on real hardware.
+# Firmware blobs: the common wifi/bluetooth/audio firmwares (non-free) so
+# driver groups work on real hardware, plus the free firmware set (Radeon
+# GPU microcode etc.) and CPU microcode updates (Intel + AMD) — bare
+# minimum on any physical x86 machine.
 firmware-linux firmware-misc-nonfree firmware-iwlwifi firmware-realtek
 firmware-ath9k-htc firmware-brcm80211 firmware-intel-sound firmware-sof-signed
+firmware-linux-free intel-microcode amd64-microcode
 
 # Modern framebuffer console packages are NOT shipped: fbterm's keyboard
 # input is broken on modern kernels. The plain console runs in UTF-8 mode
@@ -1750,7 +1764,26 @@ UPDATE_PATHS="opt/promptli etc/fastfetch etc/skel etc/zsh etc/promptli/autostart
   usr/local/bin/promptli-install usr/local/bin/promptli-update usr/local/bin/promptli-getty \
   usr/local/bin/locakhost usr/local/bin/mist usr/local/bin/starship \
   usr/share/makedeb/makedeb-rs usr/share/oh-my-zsh"
+# Kernel paths only ship in the payload when the bundled kernel ACTUALLY
+# changed vs the last published release (compared via the served manifest's
+# kernel_release). Unchanged kernels keep the payload tiny — a release that
+# only touches the promptLi layer updates in seconds. When the comparison
+# is inconclusive (no previous manifest / no field), ship the kernel paths
+# — never shrink the payload on a guess.
+KERNEL_IN_PAYLOAD="$PROMPTLI_KERNEL_SHIPPED"
+KERNEL_RELEASE=""
 if [ "$PROMPTLI_KERNEL_SHIPPED" = 1 ]; then
+    KERNEL_RELEASE=$(ls "$BUILD_DIR/chroot/lib/modules" 2>/dev/null | grep -E 'promptli$' | head -1 || true)
+    PREV_MANIFEST="${PROMPTLI_PREV_MANIFEST:-/home/ufi/promptlix/PromptLi_os/output/latest.json}"
+    if [ -f "$PREV_MANIFEST" ] && [ -n "$KERNEL_RELEASE" ]; then
+        PREV_KREL=$(python3 -c "import json,sys; m=json.load(open('$PREV_MANIFEST')); print(m.get('kernel_release') or '')" 2>/dev/null || true)
+        if [ -n "$PREV_KREL" ] && [ "$PREV_KREL" = "$KERNEL_RELEASE" ]; then
+            KERNEL_IN_PAYLOAD=0
+            echo "[i] kernel $KERNEL_RELEASE unchanged since last release — payload excludes /boot + /lib/modules"
+        fi
+    fi
+fi
+if [ "$KERNEL_IN_PAYLOAD" = 1 ]; then
     UPDATE_PATHS="$UPDATE_PATHS boot lib/modules"
 fi
 if [ -d "$BUILD_DIR/chroot" ]; then
@@ -1786,11 +1819,14 @@ if [ -f "$ISO_PATH" ]; then
   "update_url": "/api/os/update",
   "update_sha256": "$UPDATE_SHA",
   "update_size_bytes": $UPDATE_SIZE,
-  "includes_kernel": $PROMPTLI_KERNEL_SHIPPED,
+  "includes_kernel": $KERNEL_IN_PAYLOAD,
+  "kernel_release": "$KERNEL_RELEASE",
   "released_at": "$ISO_DATE",
   "release_notes": [
-    "FAST UPDATES: promptli-update now downloads a small update payload (tar.zst) instead of the full ~1.2 GB ISO — release updates take seconds, not ~18 minutes",
-    "Kernel 7.3.5 rebuilt at -march=x86-64 (baseline): runs on EVERY 64-bit x86 CPU, not just Haswell/Zen1+ — measured no performance regression",
+    "Bare-minimum core, always installed: initramfs-tools + busybox, kmod, e2fsprogs, pciutils/usbutils, firmware-linux-free, and Intel/AMD CPU microcode",
+    "TINY updates between kernel releases: the payload now skips /boot + /lib/modules when the kernel hasn't changed (kernel_release compared against the served manifest)",
+    "FAST UPDATES: promptli-update downloads a small update payload (tar.zst) instead of the full ~1.2 GB ISO — release updates take seconds, not ~18 minutes",
+    "Kernel 7.3.5 at -march=x86-64 (baseline): runs on EVERY 64-bit x86 CPU — measured no performance regression",
     "AUR installs retry git clones 3x with backoff — survives AUR rate-limiting (HTTP 429) and transient network failures",
     "Minimal, bloat-free base — no window manager, no desktop environment",
     "pacman works: Debian packages via apt, AUR packages built with makedeb; yay/paru work natively",

@@ -1,7 +1,7 @@
 # promptLi OS — Complete Project Handoff
 
 > **Audience:** the next AI (or developer) taking over this project.
-> **Last updated:** 2026-11-18, at release **1.32.2**.
+> **Last updated:** 2026-11-19, at release **1.33.0**.
 > **Read this whole document before touching anything.** It explains what the
 > project is, how every moving part works, where things live, how to build,
 > test and ship, and the traps that have already cost previous sessions hours.
@@ -33,12 +33,12 @@
   docs, receives enrollment callbacks from the installer, and serves the
   update manifest that installed machines poll.
 
-The current release is **1.32.2**, published as:
+The current release is **1.33.0**, published as:
 
 - `https://webnotes.work/os` (download page),
   `https://webnotes.work/api/os/iso` (the ISO binary, public, no login), and
   `https://webnotes.work/api/os/update` (the small update payload).
-- GitHub release `c4mandry/PromptLi_os` tag `v1.32.2` (ISO + kernel `.deb`s).
+- GitHub release `c4mandry/PromptLi_os` tag `v1.33.0` (ISO + kernel `.deb`s).
 
 Release trail: 1.29.2 fixed the AUR layer end-to-end (makedepends install,
 trixie-built makedeb-rs/mist, vendored mist — §9). 1.29.3 rebased the kernel
@@ -308,6 +308,14 @@ sudo -n env PROMPTLI_OUTPUT_DIR=/var/tmp/outputXXXX bash build_promptli.sh
 - Arch-style tooling: `pacman-package-manager`, `gnupg`, `build-essential`,
   `binutils`, `fakeroot`, `file`, `gettext`, `gawk`, `libarchive-tools`,
   `lsb-release`, `zstd`.
+- **Bare-minimum core (since 1.33.0)** — always installed, the installer can
+  never purge it: `initramfs-tools busybox` (initramfs rebuilds for kernel
+  updates — explicit so no dependency-chain accident can remove them),
+  `kmod e2fsprogs` (module + filesystem repair tooling), `pciutils usbutils`
+  (lspci/lsusb diagnostics), `firmware-linux-free` (free firmware: Radeon
+  microcode etc.) and CPU microcode updates (`intel-microcode`,
+  `amd64-microcode`). The wifi/bluetooth/audio driver groups remain
+  user-selectable as before.
 - Python (locakhost): `python3 python3-pip python3-venv`.
 
 ### 5.4 zsh / fastfetch / console conventions
@@ -518,8 +526,12 @@ TUI prints `❌ ERROR: …` and stays on the Done screen. Optional steps
      usr/local/bin/{pacman,promptli,promptli-term,promptli-kb,promptli-fast,
      promptli-norm,promptli-install,promptli-update,promptli-getty,locakhost,
      starship,mist} usr/share/oh-my-zsh usr/share/makedeb/makedeb-rs`
-     — plus `boot` and `lib/modules` **only when the release ships a kernel**
-     (`includes_kernel` in the manifest).
+     — plus `boot` and `lib/modules` **only when the bundled kernel changed
+     vs the last published release**: the build compares the chroot's
+     `kernel_release` with the served manifest's (`PROMPTLI_PREV_MANIFEST`
+     overrides the manifest path) and sets `includes_kernel` accordingly.
+     Kernel-only userspace releases update in seconds; when the comparison
+     is inconclusive the kernel paths ship (never shrink on a guess).
   4. `os-release` handling: the fast/norm mode suffix is read BEFORE the
      extraction and re-inserted **inside the quotes** afterwards (the suffix
      must never be appended after the closing quote, and the regex must not
