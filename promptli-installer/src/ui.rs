@@ -188,6 +188,13 @@ fn run_loop(terminal: &mut Term, disks: Vec<Disk>) -> io::Result<Option<Config>>
         tui_debug("poll=true");
         let ev = event::read()?;
         tui_debug(&format!("read event={ev:?}"));
+        // Terminal resizes (window/SIGWINCH, serial console attach) must
+        // re-flow the whole UI — otherwise lines render against the old
+        // width and the output staircases diagonally.
+        if let Event::Resize(w, h) = ev {
+            terminal.resize(ratatui::layout::Rect::new(0, 0, w, h))?;
+            continue;
+        }
         let Event::Key(key) = ev else { continue };
         if key.kind != KeyEventKind::Press {
             continue;
@@ -847,8 +854,33 @@ fn draw_review(f: &mut ratatui::Frame, area: Rect, cfg: &Config) {
     );
 }
 
+/// Strip terminal escape sequences and carriage returns from a captured
+/// subprocess output line. apt/curl progress output is full of `\r` and
+/// ANSI CSI codes — rendering them raw into the TUI makes rows land at
+/// wrong columns and the whole log staircase diagonally on the console.
+fn sanitize_line(l: &str) -> String {
+    let mut out = String::with_capacity(l.len());
+    let mut in_esc = false;
+    for c in l.chars() {
+        match c {
+            '\x1b' => in_esc = true,
+            _ if in_esc => {
+                if c.is_ascii_alphabetic() || c == '@' || c == '~' {
+                    in_esc = false;
+                }
+            }
+            '\r' | '\x0b' | '\x0c' => {}
+            other => out.push(other),
+        }
+    }
+    out
+}
+
 fn draw_progress(f: &mut ratatui::Frame, lines: &[String]) {
-    let text: Vec<Line> = lines.iter().map(|l| Line::from(Span::raw(l.as_str()))).collect();
+    let text: Vec<Line> = lines
+        .iter()
+        .map(|l| Line::from(Span::raw(sanitize_line(l))))
+        .collect();
     let p = Paragraph::new(text).block(list_block(" Installing … ")).wrap(Wrap { trim: true });
     f.render_widget(p, f.area());
 }
@@ -870,7 +902,7 @@ fn draw_done(f: &mut ratatui::Frame, lines: &[String]) {
         ))
     };
     let mut text: Vec<Line> = vec![header, Line::from("")];
-    text.extend(lines.iter().map(|l| Line::from(Span::raw(l.as_str()))));
+    text.extend(lines.iter().map(|l| Line::from(Span::raw(sanitize_line(l)))));
     if !failed {
         text.push(Line::from(""));
         text.push(Line::from(" Remove the install medium and reboot."));

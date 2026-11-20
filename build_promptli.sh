@@ -8,7 +8,7 @@ set -euo pipefail
 
 # Versioning: major is set by hand. Minor counts features/big changes since
 # v1.0.0 (see git history); patch counts every bug fix, however small.
-VERSION="1.33.0"
+VERSION="1.33.1"
 ISO_NAME="promptli-os-${VERSION}-amd64"
 # Set to 1 when PROMPTLI_KERNEL_DEB bundles a custom kernel — the update
 # payload then also ships /boot + /lib/modules so pacman -Syu upgrades it.
@@ -162,7 +162,8 @@ kmod e2fsprogs
 pciutils usbutils
 # kbd (loadkeys/setfont) + console-setup (console fonts): the plain console
 # keymap/font loading, so KEYMAP= and FONT= in /etc/vconsole.conf work.
-kbd console-setup
+# gpm: mouse pointer + copy/paste on the plain console.
+kbd console-setup gpm
 
 # Networking: systemd-networkd + resolved (lean; no NetworkManager/dbus bloat)
 # wpa_supplicant + iw stay for WiFi
@@ -620,6 +621,15 @@ case "$1" in
                     sleep 10
                 done
                 [ -d "$tmp/.git" ] || { echo "  [!] AUR clone failed after 3 attempts: $pkg" >&2; continue; }
+                # A valid AUR repo must have a PKGBUILD at its root. Without
+                # this check, a broken/partial clone (or a wrong name) fails
+                # later inside makepkg with a confusing
+                # "PKGBUILD does not exist" error.
+                if [ ! -f "$tmp/PKGBUILD" ]; then
+                    echo "  [!] AUR repo for '$pkg' has no PKGBUILD — wrong package name or AUR returned an empty repo" >&2
+                    rm -rf "$tmp"
+                    continue
+                fi
                 # Install deps first (makedeb -s only syncs `depends`;
                 # AUR packages like yay list build tools in makedepends).
                 (cd "$tmp" && install_aur_deps)
@@ -1366,6 +1376,36 @@ cat > config/hooks/normal/9999-promptli-customize.hook.chroot << 'HOOK'
 #!/bin/bash
 echo "⚡ Customizing promptLi OS..."
 
+# ── Initramfs: force-load the USB keyboard chain ──────────
+# When boot fails and the initramfs drops to its shell, the keyboard MUST
+# work. The kernel builds the USB controller/HID drivers as modules, and
+# initramfs-tools only loads them via udev timing — an early failure can
+# leave the shell with a dead keyboard. Listing them in
+# /etc/initramfs-tools/modules makes `load_modules` load them explicitly at
+# the very start of the init script (PS/2 is already built-in: i8042/atkbd
+# are =y in the kernel).
+echo "  [*] Initramfs: forcing USB keyboard modules into /conf/modules..."
+mkdir -p /etc/initramfs-tools
+cat > /etc/initramfs-tools/modules << 'IM'
+# USB keyboard chain — loaded explicitly at initramfs boot so the early
+# shell always has a working keyboard (USB + PS/2; PS/2 is built into the
+# kernel). usb-storage/uas keep USB boot disks usable in the same shell.
+usb-common
+usbcore
+xhci-hcd
+xhci-pci
+ehci-hcd
+ehci-pci
+ohci-hcd
+uhci-hcd
+hid
+usbhid
+hid-generic
+evdev
+usb-storage
+uas
+IM
+
 # ── Console keymap: make console-setup own it ─────────────
 # On Debian, the *console* keymap is derived from /etc/default/keyboard via
 # console-setup (setupcon/ckbcomp), NOT from /etc/vconsole.conf. Setting
@@ -1636,13 +1676,16 @@ printf '[Service]\nEnvironment=TERM=linux\n' > /etc/systemd/system/serial-getty@
 # is broken on modern kernels (keystrokes scramble into wrong Unicode), so
 # it must never sit in front of the login prompt. The console runs in UTF-8
 # mode with a Unicode-capable font so the promptLi logo renders correctly.
-echo "  [*] tty1 -> plain console (UTF-8, unicode font)..."
+echo "  [*] tty1 -> plain console (UTF-8, unicode font, cursor on)..."
 cat > /usr/local/bin/promptli-getty << 'GTY'
 #!/bin/sh
 # promptLi tty1 launcher: plain agetty. A login prompt must ALWAYS work,
 # so no fancy framebuffer terminal sits in front of it. (fbterm input is
 # broken on modern kernels — use the plain console instead.)
 TTY="${1:-tty1}"
+# Cursor: show it and blink it (\e[?25h = show, \e[?12h = blink). gpm
+# draws its own mouse pointer on top of the console.
+printf '\033[?25;12h' > "/dev/$TTY" 2>/dev/null || true
 exec /sbin/agetty --noclear --login-program /bin/login "$TTY" 115200 linux
 GTY
 chmod +x /usr/local/bin/promptli-getty
@@ -1652,6 +1695,43 @@ cat > /etc/systemd/system/getty@tty1.service.d/promptli-getty.conf << 'DROP'
 ExecStart=
 ExecStart=-/usr/local/bin/promptli-getty %I
 DROP
+
+# ── Console mouse (gpm) + cursor blink ──
+# gpm gives the plain console a mouse pointer, drag-select and middle-click
+# paste on every VT. The service is the classic sysv one (enabled here).
+echo "  [*] Enabling console mouse (gpm) + cursor blink..."
+if command -v gpm >/dev/null 2>&1; then
+    cat > /etc/default/gpm << 'GPMDEF'
+# promptLi OS: console mouse daemon, enabled on every VT.
+ENABLED=true
+GPMDEF
+    cat > /etc/gpm.conf << 'GPMCONF'
+# promptLi OS console mouse. /dev/input/mice is built into the promptLi
+# kernel (CONFIG_INPUT_MOUSEDEV=y), so PS/2 and USB mice both work.
+device=/dev/input/mice
+type=autops2
+responsiveness=15
+repeat_type=ms3
+GPMCONF
+    systemctl enable gpm 2>/dev/null || \
+        ln -sf /etc/init.d/gpm /etc/systemd/system/multi-user.target.wants/gpm.service
+else
+    echo "  [!] gpm not available — console mouse skipped"
+fi
+# fbcon cursor blink (soft cursor on the framebuffer console); the getty
+# wrapper also turns the cursor on per-VT.
+cat > /etc/systemd/system/promptli-cursor.service << 'SVC'
+[Unit]
+Description=promptLi console cursor blink
+After=systemd-vconsole-setup.service
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'echo 1 > /sys/class/graphics/fbcon/cursor_blink 2>/dev/null || true'
+[Install]
+WantedBy=multi-user.target
+SVC
+ln -sf /etc/systemd/system/promptli-cursor.service \
+       /etc/systemd/system/multi-user.target.wants/promptli-cursor.service
 
 # ── Default user: created at build time (not first boot) ──
 echo "  [*] Creating default user 'promptli'..."
@@ -1759,6 +1839,7 @@ UPDATE_SHA=""
 UPDATE_SIZE=0
 UPDATE_PATHS="opt/promptli etc/fastfetch etc/skel etc/zsh etc/promptli/autostart.d \
   etc/profile.d/promptli-version.sh etc/profile.d/promptli-path.sh etc/os-release \
+  etc/initramfs-tools/modules \
   usr/local/bin/pacman usr/local/bin/promptli usr/local/bin/promptli-term \
   usr/local/bin/promptli-kb usr/local/bin/promptli-fast usr/local/bin/promptli-norm \
   usr/local/bin/promptli-install usr/local/bin/promptli-update usr/local/bin/promptli-getty \
