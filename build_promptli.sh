@@ -1562,10 +1562,11 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
     bluez wireplumber pipewire pipewire-pulse alsa-utils polkitd pkexec 2>/dev/null || true
 apt-mark manual bluez wireplumber pipewire pipewire-pulse alsa-utils polkitd pkexec 2>/dev/null || true
-# The purge dropped polkit's enable symlink — re-enable it so systemctl's
-# interactive authorization (pkttyagent) actually works after boot.
-systemctl enable polkit 2>/dev/null || \
-    ln -sf /lib/systemd/system/polkit.service /etc/systemd/system/multi-user.target.wants/polkit.service
+# The purge dropped polkit's enable symlink and trixie's polkit.service has
+# no [Install] section (it is D-Bus activated), so `systemctl enable` is a
+# no-op — create the wants symlink directly so it is running at boot.
+ln -sf /lib/systemd/system/polkit.service \
+       /etc/systemd/system/multi-user.target.wants/polkit.service
 
 # ── Console keymap/font data must survive autoremove ────────
 # `kbd` (the kernel keymap files in /usr/share/keymaps/i386) and console-setup
