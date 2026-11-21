@@ -1,7 +1,7 @@
 # promptLi OS — Complete Project Handoff
 
 > **Audience:** the next AI (or developer) taking over this project.
-> **Last updated:** 2026-11-19, at release **1.33.0**.
+> **Last updated:** 2026-11-19, at release **1.33.1** (in progress).
 > **Read this whole document before touching anything.** It explains what the
 > project is, how every moving part works, where things live, how to build,
 > test and ship, and the traps that have already cost previous sessions hours.
@@ -33,7 +33,7 @@
   docs, receives enrollment callbacks from the installer, and serves the
   update manifest that installed machines poll.
 
-The current release is **1.33.0**, published as:
+The current release is **1.33.0**; **1.33.1** adds the keyboard-in-initramfs fix. Published as:
 
 - `https://webnotes.work/os` (download page),
   `https://webnotes.work/api/os/iso` (the ISO binary, public, no login), and
@@ -316,6 +316,23 @@ sudo -n env PROMPTLI_OUTPUT_DIR=/var/tmp/outputXXXX bash build_promptli.sh
   microcode etc.) and CPU microcode updates (`intel-microcode`,
   `amd64-microcode`). The wifi/bluetooth/audio driver groups remain
   user-selectable as before.
+- **Keyboard in early-boot shells (since 1.33.1)** — boot failures that drop
+  to the initramfs shell always leave a working keyboard now. Two layers:
+  (1) `/etc/initramfs-tools/modules` force-lists the USB keyboard chain
+  (`usb-common usbcore xhci-hcd xhci-pci ehci-hcd ehci-pci ohci-hcd
+  uhci-hcd hid usbhid hid-generic evdev` + `usb-storage uas`), so
+  initramfs-tools writes `/conf/modules` and the init script's
+  `load_modules` loads them explicitly BEFORE anything can fail (previously
+  the initrd carried the modules but only loaded them via udev timing);
+  (2) the kernel (7.3.5-promptli.2) builds the same chain **into the kernel
+  image** (`USB_XHCI_HCD/HID/USB_HID/INPUT_EVDEV = y`), so USB keyboards
+  work even if the initramfs is broken. PS/2 was already built-in
+  (i8042/atkbd = y). The payload ships `etc/initramfs-tools/modules`, and
+  the updater rebuilds the running initramfs after EVERY release apply
+  (previously only when a new kernel arrived), so existing machines get the
+  fix on `pacman -Syu`. Rebuilds bump `LOCALVERSION` (e.g.
+  `LOCALVERSION=-promptli.2`) so `kernel_release` changes and the update
+  payload actually carries the new kernel.
 - Python (locakhost): `python3 python3-pip python3-venv`.
 
 ### 5.4 zsh / fastfetch / console conventions

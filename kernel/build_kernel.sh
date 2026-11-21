@@ -30,6 +30,7 @@ set -eu
 
 VERSION="${1:-${VERSION:-7.3.5}}"
 MARCH="${MARCH:-x86-64-v3}"
+LOCALVERSION="${LOCALVERSION:--promptli}"
 JOBS="${JOBS:-4}"
 BASE_CONFIG="${BASE_CONFIG:-auto}"
 SURFACE="${SURFACE:-1}"
@@ -102,7 +103,7 @@ cp "$BASE_CONFIG" .config
 # ── 4. promptLi performance + hardening profile ────────────────────────────
 log "applying promptLi kernel profile"
 ./scripts/config \
-    --set-str LOCALVERSION "-promptli" \
+    --set-str LOCALVERSION "$LOCALVERSION" \
     --enable SCHED_BORE --enable HZ_1000 --disable HZ_250 --disable HZ_300 \
     --enable PREEMPT --disable PREEMPT_VOLUNTARY --disable PREEMPT_NONE --enable PREEMPT_DYNAMIC \
     --disable SCHEDSTATS --enable SCHED_CORE \
@@ -119,6 +120,11 @@ log "applying promptLi kernel profile"
     --enable STRICT_KERNEL_RWX --enable STRICT_MODULE_RWX \
     --enable BPF_UNPRIV_DEFAULT_OFF --disable LEGACY_TIOCSTI --disable DEVKMEM \
     --enable SECURITY_YAMA --enable SECURITY_APPARMOR --enable SECURITY_LOCKDOWN_LSM \
+    --enable USB \
+    --enable USB_XHCI_HCD --enable USB_XHCI_PCI \
+    --enable USB_EHCI_HCD --enable USB_EHCI_PCI \
+    --enable HID --enable HID_GENERIC --enable USB_HID \
+    --enable INPUT_EVDEV \
     2>/dev/null || true
 
 if [ "$SURFACE" = "1" ]; then
@@ -134,7 +140,9 @@ make olddefconfig >/dev/null
 
 # Sanity check the headline options actually took.
 for opt in CONFIG_SCHED_BORE=y CONFIG_HZ=1000 CONFIG_PREEMPT=y CONFIG_DEFAULT_BBR=y \
-           CONFIG_LRU_GEN=y CONFIG_INIT_ON_ALLOC_DEFAULT_ON=y CONFIG_ZERO_CALL_USED_REGS=y; do
+           CONFIG_LRU_GEN=y CONFIG_INIT_ON_ALLOC_DEFAULT_ON=y CONFIG_ZERO_CALL_USED_REGS=y \
+           CONFIG_USB_XHCI_HCD=y CONFIG_USB_XHCI_PCI=y CONFIG_HID=y \
+           CONFIG_USB_HID=y CONFIG_INPUT_EVDEV=y; do
     grep -qx "$opt" .config || die "config option missing after olddefconfig: $opt"
 done
 log "config OK (BORE, PREEMPT, HZ=1000, BBR, hardening)"

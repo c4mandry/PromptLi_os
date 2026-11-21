@@ -257,16 +257,22 @@ fn finish_release_layer() {
     // Kernel updates: when the release layer ships a NEWER kernel than the
     // running one, build its initramfs (the live initrd is live-boot only)
     // and refresh the bootloader so `pacman -Syu` upgrades the kernel too.
+    // When the kernel did NOT change, still rebuild the running initramfs so
+    // updated /etc/initramfs-tools config (e.g. the forced USB keyboard
+    // modules) takes effect immediately.
     proc::run_capture_combined(
         "sh",
         &[
             "-c",
             "NEWKREL=$(ls /boot/vmlinuz-* 2>/dev/null | sed 's|.*/vmlinuz-||' | sort -V | tail -1); \
-             [ -n \"$NEWKREL\" ] && [ \"$NEWKREL\" != \"$(uname -r)\" ] && { \
+             if [ -n \"$NEWKREL\" ] && [ \"$NEWKREL\" != \"$(uname -r)\" ]; then \
                  echo \"New kernel $NEWKREL found - building initramfs...\"; \
                  update-initramfs -c -k \"$NEWKREL\" 2>&1 || true; \
                  update-grub 2>&1 || true; \
-             } || true",
+             else \
+                 echo \"Rebuilding initramfs for $(uname -r)...\"; \
+                 update-initramfs -u -k \"$(uname -r)\" 2>&1 || true; \
+             fi",
         ],
     );
 }
