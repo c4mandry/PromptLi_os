@@ -8,7 +8,7 @@ set -euo pipefail
 
 # Versioning: major is set by hand. Minor counts features/big changes since
 # v1.0.0 (see git history); patch counts every bug fix, however small.
-VERSION="1.33.1"
+VERSION="1.33.2"
 ISO_NAME="promptli-os-${VERSION}-amd64"
 # Set to 1 when PROMPTLI_KERNEL_DEB bundles a custom kernel — the update
 # payload then also ships /boot + /lib/modules so pacman -Syu upgrades it.
@@ -163,7 +163,7 @@ pciutils usbutils
 # kbd (loadkeys/setfont) + console-setup (console fonts): the plain console
 # keymap/font loading, so KEYMAP= and FONT= in /etc/vconsole.conf work.
 # gpm: mouse pointer + copy/paste on the plain console.
-kbd console-setup gpm
+kbd console-setup gpm policykit-1
 
 # Networking: systemd-networkd + resolved (lean; no NetworkManager/dbus bloat)
 # wpa_supplicant + iw stay for WiFi
@@ -354,7 +354,7 @@ if dpkg -s wpasupplicant >/dev/null 2>&1; then
 fi
 # One getty only (tty1), no fbterm — plain console login.
 mkdir -p /etc/systemd/logind.conf.d
-printf '[Login]\nNAutoVTs=1\n' > /etc/systemd/logind.conf.d/promptli.conf
+printf '[Login]\nNAutoVTs=6\n' > /etc/systemd/logind.conf.d/promptli.conf
 rm -rf /etc/systemd/system/getty@tty1.service.d
 # Tighter journald caps.
 mkdir -p /etc/systemd/journald.conf.d
@@ -453,7 +453,7 @@ if dpkg -s wpasupplicant >/dev/null 2>&1; then
     rm -f /etc/systemd/system/wpa_supplicant.service
 fi
 mkdir -p /etc/systemd/logind.conf.d
-printf '[Login]\nNAutoVTs=2\n' > /etc/systemd/logind.conf.d/promptli.conf
+printf '[Login]\nNAutoVTs=6\n' > /etc/systemd/logind.conf.d/promptli.conf
 mkdir -p /etc/systemd/system/getty@tty1.service.d
 cat > /etc/systemd/system/getty@tty1.service.d/promptli-getty.conf << 'DROP'
 [Service]
@@ -1158,6 +1158,9 @@ fi
 
 # --- Plain-console prompt (TERM=linux): pure ASCII, perfect spacing ---
 if [[ "$TERM" == "linux" ]]; then
+    # Make sure the console cursor is visible and blinking on this VT
+    # (guards against a stray cursor-hide leaving the shell cursorless).
+    printf '\033[?25;12h'
     autoload -Uz vcs_info
     precmd() { vcs_info }
     zstyle ':vcs_info:git:*' formats '(%b)'
@@ -1531,7 +1534,7 @@ printf '[Journal]\nRuntimeMaxUse=16M\nRuntimeMaxFileSize=8M\nSystemMaxUse=64M\n'
 
 # Fewer virtual terminals: 2 gettys instead of 6 (each ~3MB).
 mkdir -p /etc/systemd/logind.conf.d
-printf '[Login]\nNAutoVTs=2\n' > /etc/systemd/logind.conf.d/promptli.conf
+printf '[Login]\nNAutoVTs=6\n' > /etc/systemd/logind.conf.d/promptli.conf
 
 # ── Networking: systemd-networkd + resolved (no NM/dbus bloat) ──
 echo "  [*] Enabling systemd-networkd + resolved..."

@@ -207,7 +207,17 @@ pub fn run_install(
     let machine_id = read_machine_id(target_dir)?;
     let token = enroll(&opts.site_url, &opts.version, &opts.hostname, &machine_id)
         .unwrap_or_else(|e| {
-            eprintln!("warning: enrollment failed: {e}");
+            // The TUI owns the terminal while this runs (raw mode) — a
+            // stray eprintln! would scribble ANSI-less text over the UI and
+            // staircase the console. Log to a file instead.
+            let _ = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open("/tmp/promptli-install.log")
+                .and_then(|mut f| {
+                    use std::io::Write;
+                    writeln!(f, "warning: enrollment failed: {e}")
+                });
             String::new()
         });
 
@@ -335,7 +345,14 @@ fn write_timezone(root: &Path, tz: &str) -> io::Result<()> {
     }
     let zoneinfo = root.join("usr/share/zoneinfo").join(tz);
     if !zoneinfo.exists() {
-        eprintln!("warning: unknown timezone {tz} — keeping UTC");
+        let _ = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open("/tmp/promptli-install.log")
+            .and_then(|mut f| {
+                use std::io::Write;
+                writeln!(f, "warning: unknown timezone {tz} - keeping UTC")
+            });
         return Ok(());
     }
     let _ = std::fs::remove_file(root.join("etc/localtime"));
