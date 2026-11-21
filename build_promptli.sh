@@ -163,7 +163,7 @@ pciutils usbutils
 # kbd (loadkeys/setfont) + console-setup (console fonts): the plain console
 # keymap/font loading, so KEYMAP= and FONT= in /etc/vconsole.conf work.
 # gpm: mouse pointer + copy/paste on the plain console.
-kbd console-setup gpm policykit-1
+kbd console-setup gpm
 
 # Networking: systemd-networkd + resolved (lean; no NetworkManager/dbus bloat)
 # wpa_supplicant + iw stay for WiFi
@@ -1560,8 +1560,8 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
 # symlink below still points at dbus-broker, so the heavyweight dbus-daemon
 # never runs (binaries on disk only, zero RAM cost).
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
-    bluez wireplumber pipewire pipewire-pulse alsa-utils 2>/dev/null || true
-apt-mark manual bluez wireplumber pipewire pipewire-pulse alsa-utils 2>/dev/null || true
+    bluez wireplumber pipewire pipewire-pulse alsa-utils polkitd pkexec 2>/dev/null || true
+apt-mark manual bluez wireplumber pipewire pipewire-pulse alsa-utils polkitd pkexec 2>/dev/null || true
 
 # ── Console keymap/font data must survive autoremove ────────
 # `kbd` (the kernel keymap files in /usr/share/keymaps/i386) and console-setup
