@@ -275,6 +275,27 @@ fn finish_release_layer() {
              fi",
         ],
     );
+
+    // Boot branding: force GRUB_DISTRIBUTOR to promptLi OS (installs made
+    // from older media can carry a baked-in Debian value), drop the
+    // " GNU/Linux" suffix 10_linux appends to menu entries, and regenerate
+    // grub.cfg so the next boot shows promptLi — never Debian.
+    proc::run_capture_combined(
+        "sh",
+        &[
+            "-c",
+            r#"GRUBF=/etc/default/grub
+               if grep -q '^GRUB_DISTRIBUTOR=' "$GRUBF" 2>/dev/null; then
+                   sed -i -E 's|^GRUB_DISTRIBUTOR=.*|GRUB_DISTRIBUTOR="promptLi OS"|' "$GRUBF"
+               else
+                   echo 'GRUB_DISTRIBUTOR="promptLi OS"' >> "$GRUBF"
+               fi
+               if [ -f /etc/grub.d/10_linux ]; then
+                   sed -i 's|OS="${GRUB_DISTRIBUTOR} GNU/Linux"|OS="${GRUB_DISTRIBUTOR}"|' /etc/grub.d/10_linux
+               fi
+               update-grub 2>&1 || true"#,
+        ],
+    );
 }
 
 /// Legacy path: download the full ISO and unsquashfs the promptLi-owned

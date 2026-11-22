@@ -30,7 +30,7 @@ set -eu
 
 VERSION="${1:-${VERSION:-7.3.5}}"
 MARCH="${MARCH:-x86-64-v3}"
-LOCALVERSION="${LOCALVERSION:--promptli}"
+PROMPTLI_LOCALVERSION="${PROMPTLI_LOCALVERSION:--promptli}"
 JOBS="${JOBS:-4}"
 BASE_CONFIG="${BASE_CONFIG:-auto}"
 SURFACE="${SURFACE:-1}"
@@ -103,7 +103,7 @@ cp "$BASE_CONFIG" .config
 # ── 4. promptLi performance + hardening profile ────────────────────────────
 log "applying promptLi kernel profile"
 ./scripts/config \
-    --set-str LOCALVERSION "$LOCALVERSION" \
+    --set-str LOCALVERSION "$PROMPTLI_LOCALVERSION" \
     --enable SCHED_BORE --enable HZ_1000 --disable HZ_250 --disable HZ_300 \
     --enable PREEMPT --disable PREEMPT_VOLUNTARY --disable PREEMPT_NONE --enable PREEMPT_DYNAMIC \
     --disable SCHEDSTATS --enable SCHED_CORE \

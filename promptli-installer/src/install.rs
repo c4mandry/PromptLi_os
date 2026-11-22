@@ -402,6 +402,9 @@ fn enable_serial_console(root: &Path) -> io::Result<()> {
         "GRUB_SERIAL_COMMAND",
         "serial --speed=115200 --unit=0 --word=8 --parity=no --stop=1",
     );
+    // Branding: the menu title must say promptLi OS, never a Debian-era
+    // default left over from an older live medium's /etc/default/grub.
+    ensure(&mut content, "GRUB_DISTRIBUTOR", "promptLi OS");
 
     std::fs::write(&grub_defaults, content)?;
     Ok(())

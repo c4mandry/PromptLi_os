@@ -8,7 +8,7 @@ set -euo pipefail
 
 # Versioning: major is set by hand. Minor counts features/big changes since
 # v1.0.0 (see git history); patch counts every bug fix, however small.
-VERSION="1.33.2"
+VERSION="1.33.3"
 ISO_NAME="promptli-os-${VERSION}-amd64"
 # Set to 1 when PROMPTLI_KERNEL_DEB bundles a custom kernel — the update
 # payload then also ships /boot + /lib/modules so pacman -Syu upgrades it.
@@ -935,6 +935,22 @@ cat > "$INCLUDES/etc/issue" << 'X'
 
 X
 
+# ── Bootloader identity on installed systems ─────────────
+# A literal GRUB_DISTRIBUTOR (not Debian's os-release subshell) so
+# update-grub never produces a "Debian GNU/Linux" menu title, and a
+# patched 10_linux (see the customize hook) drops the " GNU/Linux"
+# suffix from menu entries: the installed menu reads
+# "promptLi OS, with Linux <version>".
+mkdir -p "$INCLUDES/etc/default"
+cat > "$INCLUDES/etc/default/grub" << 'X'
+# promptLi OS GRUB defaults.
+GRUB_DEFAULT=0
+GRUB_TIMEOUT=5
+GRUB_DISTRIBUTOR="promptLi OS"
+GRUB_CMDLINE_LINUX_DEFAULT="quiet"
+GRUB_CMDLINE_LINUX=""
+X
+
 # ── Kernel/network hardening + latency tuning (sysctl) ────
 # Applied on both the live system and every installed system. Values follow
 # the kernel self-protection project (KSPP) recommendations plus BBR/zswap
@@ -1759,8 +1775,8 @@ if [ -f /opt/promptli/vendor/promptli-kernel.deb ]; then
     apt-mark manual initramfs-tools 2>/dev/null || true
     DEBIAN_FRONTEND=noninteractive dpkg -i /opt/promptli/vendor/promptli-kernel.deb \
         || DEBIAN_FRONTEND=noninteractive apt-get install -y -f -qq 2>/dev/null || true
-    if ls /boot/vmlinuz-*-promptli >/dev/null 2>&1; then
-        echo "  [✓] Custom kernel installed: $(ls /boot/vmlinuz-*-promptli | head -1)"
+    if ls /boot/vmlinuz-*-promptli* >/dev/null 2>&1; then
+        echo "  [✓] Custom kernel installed: $(ls /boot/vmlinuz-*-promptli* | head -1)"
         # Drop every non-promptli kernel image so the ISO ships exactly one.
         DEBIAN_KERNELS=$(dpkg -l 'linux-image-*' 2>/dev/null | awk '/^ii/{print $2}' | grep -v 'promptli' | grep -v '^linux-image-amd64$' || true)
         DEBIAN_FRONTEND=noninteractive apt-get purge -y -qq linux-image-amd64 $DEBIAN_KERNELS 2>/dev/null || true
@@ -1781,6 +1797,18 @@ chmod +x /usr/local/bin/pacman /usr/local/bin/promptli-term
 chmod +x /usr/local/bin/promptli-kb
 chmod +x /usr/local/bin/promptli-fast /usr/local/bin/promptli-norm
 chmod +x /opt/promptli/setup.sh
+
+# ── GRUB menu branding ──────────────────────────────────
+# 10_linux appends " GNU/Linux" to any distributor that doesn't already
+# end in it. Drop the suffix so installed systems show
+# "promptLi OS, with Linux <version>" instead of
+# "promptLi OS GNU/Linux, with ..." / Debian's default text.
+echo "  [*] Branding GRUB menu entries (10_linux)..."
+if [ -f /etc/grub.d/10_linux ]; then
+    sed -i 's|OS="${GRUB_DISTRIBUTOR} GNU/Linux"|OS="${GRUB_DISTRIBUTOR}"|' /etc/grub.d/10_linux
+    sed -i -E 's|^GRUB_DISTRIBUTOR=.*|GRUB_DISTRIBUTOR="promptLi OS"|' /etc/default/grub 2>/dev/null || \
+        echo 'GRUB_DISTRIBUTOR="promptLi OS"' >> /etc/default/grub
+fi
 echo "✅ Done."
 HOOK
 chmod +x config/hooks/normal/9999-promptli-customize.hook.chroot
@@ -1847,6 +1875,7 @@ UPDATE_SHA=""
 UPDATE_SIZE=0
 UPDATE_PATHS="opt/promptli etc/fastfetch etc/skel etc/zsh etc/promptli/autostart.d \
   etc/profile.d/promptli-version.sh etc/profile.d/promptli-path.sh etc/os-release \
+  etc/issue etc/motd \
   etc/initramfs-tools/modules \
   usr/local/bin/pacman usr/local/bin/promptli usr/local/bin/promptli-term \
   usr/local/bin/promptli-kb usr/local/bin/promptli-fast usr/local/bin/promptli-norm \
@@ -1862,7 +1891,7 @@ UPDATE_PATHS="opt/promptli etc/fastfetch etc/skel etc/zsh etc/promptli/autostart
 KERNEL_IN_PAYLOAD="$PROMPTLI_KERNEL_SHIPPED"
 KERNEL_RELEASE=""
 if [ "$PROMPTLI_KERNEL_SHIPPED" = 1 ]; then
-    KERNEL_RELEASE=$(ls "$BUILD_DIR/chroot/lib/modules" 2>/dev/null | grep -E 'promptli$' | head -1 || true)
+    KERNEL_RELEASE=$(ls "$BUILD_DIR/chroot/lib/modules" 2>/dev/null | grep 'promptli' | head -1 || true)
     PREV_MANIFEST="${PROMPTLI_PREV_MANIFEST:-/home/ufi/promptlix/PromptLi_os/output/latest.json}"
     if [ -f "$PREV_MANIFEST" ] && [ -n "$KERNEL_RELEASE" ]; then
         PREV_KREL=$(python3 -c "import json,sys; m=json.load(open('$PREV_MANIFEST')); print(m.get('kernel_release') or '')" 2>/dev/null || true)
@@ -1875,6 +1904,33 @@ fi
 if [ "$KERNEL_IN_PAYLOAD" = 1 ]; then
     UPDATE_PATHS="$UPDATE_PATHS boot lib/modules"
 fi
+# One-shot GRUB rebrand hook, shipped ONLY in the update payload.
+# Existing machines run an older promptli-update binary that only
+# regenerates grub.cfg when the kernel changes — but it ALWAYS rebuilds
+# the initramfs, and mkinitramfs executes /etc/initramfs-tools/hooks/*.
+# This hook therefore rebrands the installed GRUB menu on the FIRST
+# 1.33.3 update and removes itself. Written into the chroot just for the
+# payload tar below (the live ISO is already built and stays clean).
+mkdir -p "$BUILD_DIR/chroot/etc/initramfs-tools/hooks"
+cat > "$BUILD_DIR/chroot/etc/initramfs-tools/hooks/zz-grub-rebrand" << 'X'
+#!/bin/sh
+# One-shot: set GRUB_DISTRIBUTOR=promptLi OS, drop the " GNU/Linux"
+# suffix 10_linux appends, regenerate grub.cfg, then remove this hook.
+GRUBF=/etc/default/grub
+if grep -q '^GRUB_DISTRIBUTOR=' "$GRUBF" 2>/dev/null; then
+    sed -i -E 's|^GRUB_DISTRIBUTOR=.*|GRUB_DISTRIBUTOR="promptLi OS"|' "$GRUBF"
+else
+    echo 'GRUB_DISTRIBUTOR="promptLi OS"' >> "$GRUBF"
+fi
+if [ -f /etc/grub.d/10_linux ]; then
+    sed -i 's|OS="${GRUB_DISTRIBUTOR} GNU/Linux"|OS="${GRUB_DISTRIBUTOR}"|' /etc/grub.d/10_linux
+fi
+update-grub >/dev/null 2>&1 || true
+rm -f /etc/initramfs-tools/hooks/zz-grub-rebrand
+exit 0
+X
+chmod +x "$BUILD_DIR/chroot/etc/initramfs-tools/hooks/zz-grub-rebrand"
+UPDATE_PATHS="$UPDATE_PATHS etc/initramfs-tools/hooks/zz-grub-rebrand"
 if [ -d "$BUILD_DIR/chroot" ]; then
     echo "[*] Building update payload $UPDATE_NAME ..."
     # shellcheck disable=SC2086
